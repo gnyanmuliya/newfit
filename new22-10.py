@@ -279,20 +279,23 @@ class FitnessAdvisor:
         return "Low" if medical and medical != ["none"] else "None"
 
     def get_condition_guidelines(self, medical_conditions: List[str]) -> str:
+        """Return full Excel-based instructions for each condition selected."""
         guidelines = []
         for cond in medical_conditions:
-            match = condition_data[condition_data["Condition"].str.contains(cond, case=False, na=False)]
-            if not match.empty:
-                row = match.iloc[0]
+            matches = condition_data[condition_data["Condition"].str.contains(cond, case=False, na=False)]
+            for _, row in matches.iterrows():
                 guidelines.append(
-                    f"Condition: {row['Condition']}\n"
-                    f"- Avoid: {row['Contraindicated Exercises']}\n"
-                    f"- Prefer: {row['Modified / Safer Exercises']}\n"
+                    f"🩺 Condition: {row['Condition']}\n"
+                    f"- Contraindicated Exercises: {row['Contraindicated Exercises']}\n"
+                    f"- Modified / Safer Exercises: {row['Modified / Safer Exercises']}\n"
                     f"- Exercise Type: {row['Exercise Type']}\n"
-                    f"- Focus Area: {row['Affected Body Region']}\n"
-                    f"- Intensity: {row['Intensity Limit']}\n"
+                    f"- Affected Body Region: {row['Affected Body Region']}\n"
+                    f"- Intensity Limit: {row['Intensity Limit']}\n"
                 )
-        return "\n".join(guidelines) if guidelines else "No special medical restrictions found."
+        if not guidelines:
+            return "No condition-specific restrictions or modifications."
+        return "\n".join(guidelines)
+
 
     def generate_exclude_tags(self, user_profile: Dict) -> List[str]:
         """Generate exercise exclusion tags"""
@@ -310,77 +313,96 @@ class FitnessAdvisor:
         return list(tags)
 
     def generate_day_plan(self, user_profile: Dict, day_name: str, day_index: int) -> str:
-        """Generate one day's plan, guided by Excel condition data"""
-        name = user_profile.get("name", "there")
-        fitness_level = user_profile.get("fitness_level", "Level 3")
-        primary_goal = user_profile.get("primary_goal", "General fitness")
+        """Generate one day's plan using full Excel condition data and fitness-level adaptation."""
+        name = user_profile.get("name", "User")
+        fitness_level = user_profile.get("fitness_level", "Level 3 - Intermediate")
+        primary_goal = user_profile.get("primary_goal", "General Fitness")
         location = user_profile.get("workout_location", "Home")
         medical_conditions = user_profile.get("medical_conditions", ["None"])
         target_areas = user_profile.get("target_areas", ["Full Body"])
 
-        # 👇 Use the Excel condition guidelines
+        # 🩺 Include full Excel-based condition guide
         condition_guidelines = self.get_condition_guidelines(medical_conditions)
 
-        # Rotate focus by day (e.g., Core → Legs → Back → etc.)
+        # 🎯 Determine daily focus area
         focus = target_areas[day_index % len(target_areas)]
 
-        # --- Prompt for the API model ---
-        prompt = f"""
-    You are **FriskaAI**, a certified clinical exercise physiologist and AI fitness coach.
+        # 🧘 Fitness-level guidance
+        if "Beginner" in fitness_level or "Level 1" in fitness_level or "Level 2" in fitness_level:
+            intensity_instruction = (
+                "For BEGINNERS: Avoid heavy lifts, high-impact moves, or long holds. "
+                "Use bodyweight, light resistance, and focus on slow, controlled form."
+            )
+        elif "Intermediate" in fitness_level or "Level 3" in fitness_level:
+            intensity_instruction = (
+                "For INTERMEDIATE users: Moderate intensity allowed. Combine strength and mobility "
+                "while maintaining good form and breathing."
+            )
+        else:
+            intensity_instruction = (
+                "For ADVANCED users: Include progressive overload, compound movements, and moderate-high intensity as appropriate."
+            )
 
-    ### User Profile
+        # 🧠 Build the full instruction prompt
+        prompt = f"""
+    You are **FriskaAI**, a professional clinical exercise physiologist and AI trainer.
+
+    ### USER PROFILE
     - Name: {name}
     - Fitness Level: {fitness_level}
-    - Goal: {primary_goal}
-    - Location: {location}
-    - Target Focus Today: {focus}
-    - Medical Conditions & Safety Guidelines:
+    - Primary Goal: {primary_goal}
+    - Workout Location: {location}
+    - Focus Area Today: {focus}
+    - Selected Medical Conditions: {', '.join(medical_conditions)}
+
+    ### CONDITION-BASED GUIDELINES (from Excel)
     {condition_guidelines}
 
-    ### Instructions
-    Design a **safe and effective workout** for users with these conditions.
-    - Respect each condition’s contraindications and intensity limits.
-    - Prefer modified / safer exercises listed.
-    - Keep warm-up and cool-down gentle and medically safe.
+    ### FITNESS LEVEL INSTRUCTION
+    {intensity_instruction}
 
-    ### Output Format (strict)
+    ### TASK
+    Design a **safe, effective, and progressive** workout for this user considering all the above.
+    Each exercise must:
+    - Follow the condition and intensity limitations strictly.
+    - Prefer modified/safer exercises listed above.
+    - Exclude contraindicated exercises.
+    - Match the focus area and user goal.
+
+    ### OUTPUT FORMAT (STRICT)
     ### {day_name} - Focus: {focus}
 
     **Warm-up (5 min):**
-    - 2–3 light movements (duration)
+    - 2–3 gentle, condition-safe movements
 
     **Main Workout (4–5 exercises):**
     For each exercise:
-    - Exercise Name
+    - Name
     - Benefit
     - Sets/Reps
-    - Intensity (RPE or %1RM per condition limit)
+    - Intensity (use RPE or %1RM consistent with level and condition)
     - Rest
     - Safety Tip
 
     **Cool-down (5 min):**
-    - 2–3 stretches or breathing drills
+    - 2–3 recovery stretches or breathing drills
 
-    Keep it under 700 tokens and easy for general users to follow.
+    Keep it concise (under 700 tokens), medically sound, and level-appropriate.
     """
 
+        # --- Send to API ---
         try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
             payload = {
                 "model": "fitness-advisor",
                 "messages": [
                     {"role": "system", "content": "You are FriskaAI, a concise medical fitness expert."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.7,
-                "max_tokens": 1200
+                "max_tokens": 1200,
             }
-
-            resp = requests.post(self.endpoint_url, headers=headers, json=payload, timeout=30)
-
+            resp = requests.post(self.endpoint_url, headers=headers, json=payload, timeout=40)
             if resp.status_code == 200:
                 result = resp.json()
                 choices = result.get("choices")
@@ -390,9 +412,11 @@ class FitnessAdvisor:
                         return content.strip()
         except Exception as e:
             st.warning(f"API error for {day_name}: {e}")
+            return self.generate_local_day_plan(user_profile, day_name, day_index)
 
-        # --- Fallback if API fails ---
+        # fallback
         return self.generate_local_day_plan(user_profile, day_name, day_index)
+
 
 
     def generate_local_day_plan(self, user_profile: Dict, day_name: str, day_index: int) -> str:
