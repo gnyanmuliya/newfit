@@ -363,7 +363,8 @@ Use the following condition-specific restrictions and safe exercise recommendati
 {condition_guidelines}
 
 - ONLY apply medical modification rules if the user has a medical condition.
-- If NO medical condition: train as a normal healthy individual.
+- If NO medical condition: follow age-appropriate fitness progression instead of general population rules.
+
 
 ### GENERAL TRAINING RULES
 - If age < 40 and no mobility issues → **NO seated/chair workouts**
@@ -372,6 +373,34 @@ Use the following condition-specific restrictions and safe exercise recommendati
 - Every day MUST have different exercises (no repeating the same plan)
 - Ensure push / pull / legs / core movement balance
 - Prioritize functional standing movements unless medically restricted
+### GENERAL TRAINING RULES
+- Prioritize safety, joint protection, and controlled tempo
+- Warm-ups must be mobility + activation (not strength drills)
+- Cool-downs must be stretching + breathing (not main exercises)
+- No repetition of warm-up/cool-down movements in main workout
+- Maintain balance between push / pull / legs / core
+
+### AGE-ADAPTIVE TRAINING RULES (STRICT)
+If Age ≥ 60:
+- Treat as beginner unless user explicitly states very active
+- Use low-impact, joint-friendly movements
+- Prioritize: sit-to-stand, wall push-ups, band rows, heel raises, step taps, marching, supported balance work
+- Avoid for first 4 weeks:
+  - Jumping or impact work (NO jumping jacks / jump squats)
+  - Floor planks (use standing/bench supported core instead)
+  - Heavy squats (use chair-assisted sit-to-stand)
+  - Burpees, mountain climbers, HIIT moves
+- Balance and fall-prevention must be included weekly
+- Mobility before stability before strength progression
+
+### AGE < 60 RULE
+If age < 60 and no limitations → avoid seated or chair-based exercises unless goal is rehab
+
+### NO CONDITION RULE UPDATE
+If user has NO medical condition:
+- Still follow age-appropriate exercise safety rules
+- Senior guidelines override fitness level when needed
+- Focus on foundational strength, mobility & balance
 
 ### INTENSITY RULES
 Beginner = 
@@ -400,7 +429,9 @@ Format exactly as follows:
 
 ### {day_name} — {focus}
 
-**Warm-Up (5 minutes)**  
+**Warm-Up (5 minutes)**
+Warm-up must not include squats, planks, or strength movements. Only mobility:
+Examples: marching in place, shoulder circles, ankle mobility, thoracic rotations, hip openers, diaphragmatic breathing
 - 3 movements  
 Format each:  
 Movement — Benefit — Duration — Safety cue  
@@ -421,7 +452,8 @@ Rules:
 - Must follow medical sheet when condition exists  
 - Must alternate muscle groups if possible  
 
-**Cool-Down (5 minutes)**  
+**Cool-Down (5 minutes)** 
+Cool-down must not include yoga poses requiring hands/knees on floor unless user is under 60 and mobile.
 - 3 movements  
 Format each:  
 Stretch / breathing drill — Benefit — Duration — Safety cue
@@ -1028,6 +1060,7 @@ elif st.session_state.onboarding_step == 5:
     equipment_options = [
         "None (Bodyweight only)",
         "Yoga Mat",
+        "Resistance Band",
         "Resistance Bands",
         "Dumbbells",
         "Kettlebells",
