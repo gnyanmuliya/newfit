@@ -8,7 +8,7 @@ import re
 import random
 
 
-condition_data = pd.read_excel("Top Lifestyle Disorders and Medical Conditions & ExerciseTags.xlsx")  # your Excel file
+condition_data = pd.read_excel("Top Lifestyle Disorders and Medical Conditions & ExerciseTags.xlsx")
 condition_data.fillna("", inplace=True)
 
 
@@ -427,14 +427,14 @@ Home workout movement priority:
 ### WORKOUT FORMAT (STRICT)
 Format exactly as follows:
 
-### {day_name} — {focus}
+### {day_name} – {focus}
 
 **Warm-Up (5 minutes)**
 Warm-up must not include squats, planks, or strength movements. Only mobility:
 Examples: marching in place, shoulder circles, ankle mobility, thoracic rotations, hip openers, diaphragmatic breathing
 - 3 movements  
 Format each:  
-Movement — Benefit — Duration — Safety cue  
+Movement – Benefit – Duration – Safety cue  
 (Examples: arm circles, marching in place, hip openers, cat-cow, ankle mobilizations, breathing drills)
 
 **Main Workout (4–6 exercises)**  
@@ -456,7 +456,7 @@ Rules:
 Cool-down must not include yoga poses requiring hands/knees on floor unless user is under 60 and mobile.
 - 3 movements  
 Format each:  
-Stretch / breathing drill — Benefit — Duration — Safety cue
+Stretch / breathing drill – Benefit – Duration – Safety cue
 
 ### IMPORTANT SAFETY REQUIREMENTS
 - NO seated/rehab-style movements unless medically required  
@@ -590,172 +590,71 @@ Remember: Progress takes time. Listen to your body and adjust as needed.
 fitness_advisor = FitnessAdvisor(API_KEY, ENDPOINT_URL)
 
 # Initialize session state
-if 'onboarding_step' not in st.session_state:
-    st.session_state.onboarding_step = 0
-if 'user_data' not in st.session_state:
-    st.session_state.user_data = {}
+if 'fitness_plan' not in st.session_state:
+    st.session_state.fitness_plan = None
 
-# Progress indicator
-def show_progress():
-    total_steps = 7
-    current = st.session_state.onboarding_step
-    progress = current / total_steps
-    st.progress(progress)
-    st.caption(f"Step {current} of {total_steps}")
+# ============ MAIN SINGLE PAGE FORM ============
+st.title("🏋️‍♂️ FriskaAi - Your Personal Fitness Advisor")
+st.markdown("**Personalized health & function plan for special populations.**")
+st.markdown("---")
 
-# Navigation buttons
-def nav_buttons(show_back=True, show_next=True, next_label="Next →"):
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if show_back and st.session_state.onboarding_step > 0:
-            if st.button("← Back"):
-                st.session_state.onboarding_step -= 1
-                st.rerun()
-    with col3:
-        if show_next:
-            if st.button(next_label, type="primary"):
-                return True
-    return False
-
-# ============ STEP 0: WELCOME ============
-if st.session_state.onboarding_step == 0:
-    st.title("🏋️‍♂️ FriskaAi - Your Personal Fitness Advisor")
-    st.markdown("---")
+with st.form("fitness_intake_form"):
     
-    st.markdown("""
-    ### 👋 Welcome to FriskaAi!
+    # ============ SECTION 1: BASIC INFORMATION ============
+    st.header("👤 Basic Information & Measurements")
     
-    **Personalized health & function plan for special populations.**
-    
-    We create customized fitness programs that consider:
-    - ✅ Your medical conditions and limitations
-    - ✅ Your functional abilities and goals
-    - ✅ Your available equipment and time
-    - ✅ Safe progressions tailored to YOU
-    
-    This onboarding takes about **5-7 minutes** and will help us create the perfect plan.
-    
-    *Let's get started on your fitness journey!* 💪
-    """)
-    
-    if st.button("🚀 Begin Onboarding", type="primary", use_container_width=True):
-        st.session_state.onboarding_step = 1
-        st.rerun()
-
-# ============ STEP 1: BASIC INFORMATION + PHYSICAL MEASUREMENTS ============
-elif st.session_state.onboarding_step == 1:
-    st.title("👤 Step 1: Basic Information & Measurements")
-    show_progress()
-    st.markdown("*Tell us about yourself*")
-    
-    # Basic info
-    name = st.text_input("What's your name?*", value=st.session_state.user_data.get('name', ''))
+    name = st.text_input("What's your name?*")
     
     col1, col2 = st.columns(2)
     with col1:
-        age = st.number_input("Age*", 16, 100, st.session_state.user_data.get('age', 25))
+        age = st.number_input("Age*", 16, 100, 25)
     with col2:
-        gender = st.selectbox("Gender*", ["Male", "Female", "Other"], 
-                             index=["Male", "Female", "Other"].index(st.session_state.user_data.get('gender', 'Male')))
+        gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
     
-    st.markdown("---")
-    st.markdown("### 📏 Physical Measurements")
+    st.subheader("📏 Physical Measurements")
     
     col3, col4 = st.columns(2)
-    
     with col3:
-        unit_system = st.radio(
-            "Measurement System*",
-            ["Metric (kg, cm)", "Imperial (lbs, inches)"],
-            index=0 if st.session_state.user_data.get('unit_system', "Metric (kg, cm)") == "Metric (kg, cm)" else 1
-        )
+        unit_system = st.radio("Measurement System*", ["Metric (kg, cm)", "Imperial (lbs, inches)"])
     
     is_metric = "Metric" in unit_system
     
     col5, col6 = st.columns(2)
-    
     with col5:
         if is_metric:
-            height = st.number_input(
-                "Height (cm)*", 
-                100, 250, 
-                st.session_state.user_data.get('height', 170),
-                help="Enter your height in centimeters"
-            )
+            height = st.number_input("Height (cm)*", 100, 250, 170)
         else:
-            height = st.number_input(
-                "Height (inches)*", 
-                39, 98, 
-                st.session_state.user_data.get('height', 67),
-                help="Enter your height in inches"
-            )
+            height = st.number_input("Height (inches)*", 39, 98, 67)
     
     with col6:
         if is_metric:
-            weight = st.number_input(
-                "Weight (kg)*", 
-                30.0, 300.0, 
-                st.session_state.user_data.get('weight', 70.0),
-                step=0.5,
-                help="Enter your weight in kilograms"
-            )
+            weight = st.number_input("Weight (kg)*", 30.0, 300.0, 70.0, step=0.5)
         else:
-            weight = st.number_input(
-                "Weight (lbs)*", 
-                66.0, 660.0, 
-                st.session_state.user_data.get('weight', 154.0),
-                step=0.5,
-                help="Enter your weight in pounds"
-            )
+            weight = st.number_input("Weight (lbs)*", 66.0, 660.0, 154.0, step=0.5)
     
     # Calculate BMI
     if is_metric:
         bmi = weight / ((height / 100) ** 2)
     else:
         bmi = (weight / (height ** 2)) * 703
-    
     bmi = round(bmi, 1)
     
-    # BMI Category
     if bmi < 18.5:
         bmi_category = "Underweight"
-        bmi_color = "blue"
     elif 18.5 <= bmi < 25:
         bmi_category = "Normal weight"
-        bmi_color = "green"
     elif 25 <= bmi < 30:
         bmi_category = "Overweight"
-        bmi_color = "orange"
     else:
         bmi_category = "Obese"
-        bmi_color = "red"
     
     st.info(f"**Your BMI:** {bmi} ({bmi_category})")
     
-    if nav_buttons(show_back=False):
-        if name:
-            st.session_state.user_data.update({
-                'name': name, 
-                'age': age, 
-                'gender': gender,
-                'unit_system': unit_system,
-                'height': height,
-                'weight': weight,
-                'bmi': bmi,
-                'bmi_category': bmi_category
-            })
-            st.session_state.onboarding_step = 2
-            st.rerun()
-        else:
-            st.error("Please enter your name")
-
-# ============ STEP 2: GOALS + TARGET AREAS ============
-elif st.session_state.onboarding_step == 2:
-    st.title("🎯 Step 2: Your Goals & Target Areas")
-    show_progress()
-    st.markdown("*What do you want to achieve?*")
+    st.markdown("---")
     
-    # Primary Goal
+    # ============ SECTION 2: GOALS & TARGET AREAS ============
+    st.header("🎯 Your Goals & Target Areas")
+    
     goal_options = [
         "Weight Loss",
         "Muscle Gain",
@@ -767,23 +666,12 @@ elif st.session_state.onboarding_step == 2:
         "Other"
     ]
     
-    primary_goal = st.selectbox(
-        "Choose ONE primary goal*", 
-        goal_options,
-        index=0 if 'primary_goal' not in st.session_state.user_data else 
-              goal_options.index(st.session_state.user_data.get('primary_goal', goal_options[0]))
-    )
+    primary_goal = st.selectbox("Choose ONE primary goal*", goal_options)
     
-    # If "Other" is selected, show text input
     primary_goal_other = ""
     if primary_goal == "Other":
-        primary_goal_other = st.text_input(
-            "Please specify your primary goal*",
-            value=st.session_state.user_data.get('primary_goal_other', ''),
-            placeholder="e.g., Training for a marathon, recovering from surgery..."
-        )
+        primary_goal_other = st.text_input("Please specify your primary goal*")
     
-    # Secondary goals
     secondary_goal_options = [
         "Energy & Stamina",
         "Flexibility",
@@ -793,36 +681,17 @@ elif st.session_state.onboarding_step == 2:
         "Weight Management"
     ]
     
-    secondary_goals = st.multiselect(
-        "Secondary goals (optional, select multiple):",
-        secondary_goal_options,
-        default=st.session_state.user_data.get('secondary_goals', [])
-    )
-    
-    st.markdown("---")
-    st.markdown("### 🎯 Target Areas")
-    st.markdown("*Which body areas do you want to focus on? (choose 1-3)*")
+    secondary_goals = st.multiselect("Secondary goals (optional):", secondary_goal_options)
     
     target_options = [
         "Full Body", "Core", "Legs", "Arms", "Back", "Chest", 
         "Shoulders", "Glutes", "Stomach"
     ]
     
-    target_areas = st.multiselect(
-        "Target Areas:",
-        target_options,
-        default=st.session_state.user_data.get('target_areas', ["Full Body"])
-    )
+    target_areas = st.multiselect("Target Areas (1-3)*:", target_options, default=["Full Body"])
     
-    if not target_areas:
-        st.warning("Please select at least one target area")
-    elif len(target_areas) > 3:
-        st.info("💡 Tip: Focusing on 1-3 areas typically yields better results")
-    
-    # Special handling for Rehabilitation goal
     doctor_clearance = "Unknown"
     rehab_stage = None
-    
     if "Rehabilitation" in primary_goal:
         st.info("⚕️ Rehabilitation requires medical clearance")
         doctor_clearance = st.selectbox("Doctor clearance?*", 
@@ -831,450 +700,390 @@ elif st.session_state.onboarding_step == 2:
             rehab_stage = st.selectbox("Rehab Stage*", 
                 ["Phase 1 (Early/Acute)", "Phase 2 (Progressive)", "Phase 3 (Advanced)"])
     
-    if nav_buttons():
-        # Validate based on primary goal selection
-        if primary_goal == "Other" and not primary_goal_other:
-            st.error("Please specify your primary goal")
-        elif not target_areas:
-            st.error("Please select at least one target area")
-        else:
-            final_primary_goal = primary_goal_other if primary_goal == "Other" else primary_goal
-            st.session_state.user_data.update({
-                'primary_goal': final_primary_goal,
-                'secondary_goals': secondary_goals,
-                'target_areas': target_areas,
-                'doctor_clearance': doctor_clearance,
-                'rehab_stage': rehab_stage
-            })
-            st.session_state.onboarding_step = 3
-            st.rerun()
-
-# ============ STEP 3: HEALTH & MEDICAL SCREENING ============
-elif st.session_state.onboarding_step == 3:
-    st.title("🥼 Step 3: Health & Medical Screening")
-    show_progress()
-    st.markdown("*This helps us create a safe program for you*")
+    st.markdown("---")
     
-    # Medical conditions selection
+    # ============ SECTION 3: HEALTH & MEDICAL SCREENING
+    # ============ SECTION 3: HEALTH & MEDICAL SCREENING ============
+    st.header("🏥 Health & Medical Screening")
+    
+    st.warning("⚠️ Please consult your healthcare provider before starting any new exercise program, especially if you have medical conditions.")
+    
     medical_conditions = st.multiselect(
-        "Select any medical conditions (select all that apply)*", 
+        "Do you have any of these medical conditions?*",
         MEDICAL_CONDITIONS,
-        default=st.session_state.user_data.get('medical_conditions', ["None"])
+        default=["None"]
     )
     
-    # If "Other" is selected, show text input
-    medical_conditions_other = ""
+    medical_other = ""
     if "Other" in medical_conditions:
-        medical_conditions_other = st.text_input(
-            "Please specify your medical condition*",
-            value=st.session_state.user_data.get('medical_conditions_other', ''),
-            placeholder="e.g., Specific condition not listed above..."
+        medical_other = st.text_input("Please specify other medical condition(s)*")
+    
+    st.subheader("💊 Current Medications")
+    takes_medication = st.radio("Are you currently taking any medications?*", ["No", "Yes"])
+    
+    medication_list = ""
+    if takes_medication == "Yes":
+        medication_list = st.text_area(
+            "Please list your medications (one per line):",
+            placeholder="e.g., Blood pressure medication\nDiabetes medication\nThyroid medication"
         )
-    
-    # Current medications
-    st.markdown("---")
-    st.markdown("### 💊 Current Medications")
-    
-    taking_medications = st.radio(
-        "Are you currently taking any medications?*",
-        ["No", "Yes"],
-        index=0 if st.session_state.user_data.get('taking_medications', 'No') == 'No' else 1
-    )
-    
-    medications_list = ""
-    if taking_medications == "Yes":
-        medications_list = st.text_area(
-            "Please list your medications (optional)",
-            value=st.session_state.user_data.get('medications_list', ''),
-            placeholder="e.g., Blood pressure medication, insulin, etc.",
-            help="This helps us understand potential exercise interactions"
-        )
-    
-    # Physical limitations
-    st.markdown("---")
-    st.markdown("### 🚫 Physical Limitations")
     
     physical_limitations = st.text_area(
-        "Any injuries, pain, or physical limitations?*",
-        value=st.session_state.user_data.get('physical_limitations', ''),
-        placeholder="e.g., Lower back pain, knee injury, shoulder mobility issues...",
-        help="Be specific about any areas that hurt or limit your movement"
+        "Do you have any physical limitations or injuries?",
+        placeholder="e.g., Recent knee surgery, chronic back pain, limited shoulder mobility..."
     )
     
-    if nav_buttons():
-        # Validate "Other" medical condition
-        if "Other" in medical_conditions and not medical_conditions_other:
-            st.error("Please specify your medical condition")
-        else:
-            # Add "Other" condition to the list if specified
-            final_medical_conditions = medical_conditions.copy()
-            if "Other" in medical_conditions and medical_conditions_other:
-                final_medical_conditions.remove("Other")
-                final_medical_conditions.append(medical_conditions_other)
-            
-            st.session_state.user_data.update({
-                'medical_conditions': final_medical_conditions,
-                'taking_medications': taking_medications,
-                'medications_list': medications_list,
-                'physical_limitations': physical_limitations
-            })
-            st.session_state.onboarding_step = 4
-            st.rerun()
-
-# ============ STEP 4: ACTIVITY & LIFESTYLE + FITNESS LEVEL ============
-elif st.session_state.onboarding_step == 4:
-    st.title("📊 Step 4: Activity & Lifestyle Assessment")
-    show_progress()
-    st.markdown("*Help us understand your current fitness level*")
-    
-    # Current Activity Level (Dropdown)
-    st.markdown("### 🏃 Current Activity Level")
-    
-    activity_level = st.selectbox(
-        "How would you describe your current activity level?*",
-        [
-            "Sedentary (little to no exercise)",
-            "Lightly Active (light exercise 1-2 days/week)",
-            "Moderately Active (moderate exercise 3-4 days/week)",
-            "Very Active (intense exercise 5-6 days/week)",
-            "Extremely Active (intense daily exercise or physical job)"
-        ],
-        index=0 if 'activity_level' not in st.session_state.user_data else
-              [
-                  "Sedentary (little to no exercise)",
-                  "Lightly Active (light exercise 1-2 days/week)",
-                  "Moderately Active (moderate exercise 3-4 days/week)",
-                  "Very Active (intense exercise 5-6 days/week)",
-                  "Extremely Active (intense daily exercise or physical job)"
-              ].index(st.session_state.user_data.get('activity_level'))
-    )
-    
-    # Daily Stress Level (Dropdown)
     st.markdown("---")
-    st.markdown("### 😰 Daily Stress Level")
     
-    stress_level = st.selectbox(
-        "How would you rate your daily stress level?*",
-        [
-            "Low (minimal stress, well-managed)",
-            "Moderate (some stress, generally manageable)",
-            "High (frequent stress, affecting daily life)",
-            "Very High (constant stress, overwhelming)"
-        ],
-        index=0 if 'stress_level' not in st.session_state.user_data else
-              [
-                  "Low (minimal stress, well-managed)",
-                  "Moderate (some stress, generally manageable)",
-                  "High (frequent stress, affecting daily life)",
-                  "Very High (constant stress, overwhelming)"
-              ].index(st.session_state.user_data.get('stress_level', "Moderate (some stress, generally manageable)"))
-    )
+    # ============ SECTION 4: ACTIVITY & LIFESTYLE ASSESSMENT ============
+    st.header("🚶 Activity & Lifestyle Assessment")
     
-    # Sleep Quality
-    col1, col2 = st.columns(2)
+    activity_level_options = [
+        "Sedentary (little to no exercise)",
+        "Lightly Active (light exercise 1-3 days/week)",
+        "Moderately Active (moderate exercise 3-5 days/week)",
+        "Very Active (intense exercise 6-7 days/week)",
+        "Extremely Active (physical job + intense exercise)"
+    ]
     
-    with col1:
-        sleep_hours = st.slider(
-            "Average sleep hours per night*",
-            4, 12, 
-            st.session_state.user_data.get('sleep_hours', 7),
-            help="Hours of sleep you typically get"
+    current_activity = st.selectbox("Current Activity Level*", activity_level_options)
+    
+    col7, col8 = st.columns(2)
+    with col7:
+        stress_level = st.selectbox(
+            "Daily Stress Level*",
+            ["Low", "Moderate", "High", "Very High"]
         )
     
-    with col2:
+    with col8:
         sleep_quality = st.selectbox(
-            "Sleep quality*",
-            ["Poor", "Fair", "Good", "Excellent"],
-            index=["Poor", "Fair", "Good", "Excellent"].index(
-                st.session_state.user_data.get('sleep_quality', 'Good')
-            )
+            "Sleep Quality*",
+            ["Poor", "Fair", "Good", "Excellent"]
         )
     
-    # Fitness Level Assessment (Dropdown - Level 1-5)
-    st.markdown("---")
-    st.markdown("### 💪 Fitness Level Assessment")
+    sleep_hours = st.slider("Average Sleep Hours per Night*", 3, 12, 7, 1)
     
-    fitness_level_descriptions = {
-        "Level 1 - Beginner": "New to exercise or returning after long break. Need to build basic foundation.",
-        "Level 2 - Early Intermediate": "Can do basic exercises with good form. Ready for slight progression.",
-        "Level 3 - Intermediate": "Regular exerciser. Comfortable with most movements and moderate intensity.",
-        "Level 4 - Advanced": "Experienced with various training methods. Can handle high intensity.",
-        "Level 5 - Elite/Athlete": "Highly trained. Training at competitive or professional level."
-    }
+    st.subheader("💪 Fitness Experience")
     
-    fitness_level = st.selectbox(
-        "Select your current fitness level*",
-        list(fitness_level_descriptions.keys()),
-        index=2 if 'fitness_level' not in st.session_state.user_data else
-              list(fitness_level_descriptions.keys()).index(
-                  st.session_state.user_data.get('fitness_level', 'Level 3 - Intermediate')
-              ),
-        help="Be honest - this ensures safe and effective programming"
+    fitness_level_options = [
+        "Level 1 - Complete Beginner (New to exercise)",
+        "Level 2 - Beginner (Some experience, 0-6 months)",
+        "Level 3 - Intermediate (Regular exerciser, 6 months - 2 years)",
+        "Level 4 - Advanced (Experienced, 2+ years consistent training)",
+        "Level 5 - Expert (Athlete or fitness professional)"
+    ]
+    
+    fitness_level = st.selectbox("Fitness Level*", fitness_level_options)
+    
+    previous_experience = st.text_area(
+        "Previous Exercise Experience (optional)",
+        placeholder="e.g., Played soccer in high school, did yoga for 2 years, completed a 5K race..."
     )
     
-    st.info(f"**{fitness_level}:** {fitness_level_descriptions[fitness_level]}")
-    
-    # Previous Exercise Experience
     st.markdown("---")
-    exercise_experience = st.text_area(
-        "Previous exercise experience (optional)",
-        value=st.session_state.user_data.get('exercise_experience', ''),
-        placeholder="e.g., Played sports in college, did CrossFit for 2 years, yoga practitioner...",
-        help="Tell us about your fitness background"
-    )
     
-    if nav_buttons():
-        st.session_state.user_data.update({
-            'activity_level': activity_level,
-            'stress_level': stress_level,
-            'sleep_hours': sleep_hours,
-            'sleep_quality': sleep_quality,
-            'fitness_level': fitness_level,
-            'exercise_experience': exercise_experience
-        })
-        st.session_state.onboarding_step = 5
-        st.rerun()
-
-# ============ STEP 5: FITNESS ENVIRONMENT & CONSTRAINTS ============
-elif st.session_state.onboarding_step == 5:
-    st.title("🏠 Step 5: Fitness Environment & Constraints")
-    show_progress()
-    st.markdown("*Where and when will you train?*")
+    # ============ SECTION 5: FITNESS ENVIRONMENT & CONSTRAINTS ============
+    st.header("🏠 Fitness Environment & Constraints")
     
-    # Workout Location
-    st.markdown("### 📍 Workout Location")
+    workout_location_options = [
+        "Home",
+        "Small Home Gym",
+        "Large Commercial Gym",
+        "Outdoor/Park",
+        "Mixed (Home + Gym)"
+    ]
     
-    workout_location = st.selectbox(
-        "Where will you primarily work out?*",
-        ["Home", "Small Home Gym", "Large Gym/Fitness Center", "Outdoor", "Mixed (Various locations)"],
-        index=0 if 'workout_location' not in st.session_state.user_data else
-              ["Home", "Small Home Gym", "Large Gym/Fitness Center", "Outdoor", "Mixed (Various locations)"].index(
-                  st.session_state.user_data.get('workout_location', 'Home')
-              )
-    )
-    
-    # Available Equipment
-    st.markdown("---")
-    st.markdown("### 🏋️ Available Equipment")
+    workout_location = st.selectbox("Primary Workout Location*", workout_location_options)
     
     equipment_options = [
-        "None (Bodyweight only)",
-        "Yoga Mat",
-        "Resistance Band",
+        "None - Bodyweight Only",
+        "Mat",
         "Resistance Bands",
         "Dumbbells",
         "Kettlebells",
-        "Barbell & Plates",
+        "Barbell",
         "Pull-up Bar",
         "Bench",
         "Squat Rack",
-        "Cardio Machine (Treadmill/Bike)",
-        "Full Gym Access"
+        "Treadmill",
+        "Stationary Bike",
+        "Rowing Machine",
+        "Medicine Ball",
+        "Foam Roller",
+        "TRX/Suspension Trainer"
     ]
     
     available_equipment = st.multiselect(
-        "Select available equipment:",
+        "Available Equipment*",
         equipment_options,
-        default=st.session_state.user_data.get('available_equipment', ["None (Bodyweight only)"])
+        default=["None - Bodyweight Only"]
     )
     
-    # Workout Schedule
-    st.markdown("---")
-    st.markdown("### 📅 Workout Schedule")
+    st.subheader("📅 Training Schedule")
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        workout_frequency = st.selectbox(
-            "How many days per week can you train?*",
-            [2, 3, 4, 5, 6, 7],
-            index=1 if 'workout_frequency' not in st.session_state.user_data else
-                  [2, 3, 4, 5, 6, 7].index(st.session_state.user_data.get('workout_frequency', 3))
+    col9, col10 = st.columns(2)
+    with col9:
+        days_per_week = st.selectbox(
+            "Workout Frequency (days per week)*",
+            [1, 2, 3, 4, 5, 6, 7],
+            index=2
         )
     
-    with col2:
-        session_duration = st.selectbox(
-            "How long per session?*",
-            ["20-30 minutes", "30-45 minutes", "45-60 minutes", "60-90 minutes", "90+ minutes"],
-            index=1 if 'session_duration' not in st.session_state.user_data else
-                  ["20-30 minutes", "30-45 minutes", "45-60 minutes", "60-90 minutes", "90+ minutes"].index(
-                      st.session_state.user_data.get('session_duration', '30-45 minutes')
-                  )
-        )
-    
-    # Preferred Days
-    st.markdown("### 🗓️ Preferred Training Days")
+    with col10:
+        session_duration_options = [
+            "15-20 minutes",
+            "20-30 minutes",
+            "30-45 minutes",
+            "45-60 minutes",
+            "60-90 minutes",
+            "90+ minutes"
+        ]
+        session_duration = st.selectbox("Preferred Session Duration*", session_duration_options, index=2)
     
     all_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     
     selected_days = st.multiselect(
-        "Select your preferred training days*",
+        f"Preferred Training Days* (Select {days_per_week})",
         all_days,
-        default=st.session_state.user_data.get('selected_days', all_days[:workout_frequency])
+        default=all_days[:days_per_week]
     )
     
-    if len(selected_days) != workout_frequency:
-        st.warning(f"⚠️ Please select exactly {workout_frequency} days")
+    preferred_time_options = [
+        "Early Morning (5-7 AM)",
+        "Morning (7-10 AM)",
+        "Late Morning (10 AM-12 PM)",
+        "Afternoon (12-3 PM)",
+        "Late Afternoon (3-6 PM)",
+        "Evening (6-9 PM)",
+        "Night (9 PM+)",
+        "Flexible/Varies"
+    ]
     
-    # Preferred Time
-    preferred_time = st.selectbox(
-        "Preferred workout time*",
-        ["Morning (5-9 AM)", "Mid-Morning (9-12 PM)", "Afternoon (12-5 PM)", "Evening (5-9 PM)", "Night (9 PM+)", "Flexible"],
-        index=0 if 'preferred_time' not in st.session_state.user_data else
-              ["Morning (5-9 AM)", "Mid-Morning (9-12 PM)", "Afternoon (12-5 PM)", "Evening (5-9 PM)", "Night (9 PM+)", "Flexible"].index(
-                  st.session_state.user_data.get('preferred_time', 'Morning (5-9 AM)')
-              )
-    )
-    
-    if nav_buttons():
-        if len(selected_days) != workout_frequency:
-            st.error(f"Please select exactly {workout_frequency} training days")
-        else:
-            st.session_state.user_data.update({
-                'workout_location': workout_location,
-                'available_equipment': available_equipment,
-                'workout_frequency': workout_frequency,
-                'session_duration': session_duration,
-                'selected_days': selected_days,
-                'preferred_time': preferred_time
-            })
-            st.session_state.onboarding_step = 6
-            st.rerun()
-
-# ============ STEP 6: FINAL REVIEW ============
-elif st.session_state.onboarding_step == 6:
-    st.title("✅ Step 6: Review Your Information")
-    show_progress()
-    st.markdown("*Please review your information before we generate your plan*")
-    
-    user_data = st.session_state.user_data
-    
-    # Personal Information
-    with st.expander("👤 Personal Information", expanded=True):
-        st.write(f"**Name:** {user_data.get('name')}")
-        st.write(f"**Age:** {user_data.get('age')} years")
-        st.write(f"**Gender:** {user_data.get('gender')}")
-        st.write(f"**Height:** {user_data.get('height')} {'cm' if 'Metric' in user_data.get('unit_system') else 'inches'}")
-        st.write(f"**Weight:** {user_data.get('weight')} {'kg' if 'Metric' in user_data.get('unit_system') else 'lbs'}")
-        st.write(f"**BMI:** {user_data.get('bmi')} ({user_data.get('bmi_category')})")
-    
-    # Goals
-    with st.expander("🎯 Goals & Target Areas", expanded=True):
-        st.write(f"**Primary Goal:** {user_data.get('primary_goal')}")
-        if user_data.get('secondary_goals'):
-            st.write(f"**Secondary Goals:** {', '.join(user_data.get('secondary_goals'))}")
-        st.write(f"**Target Areas:** {', '.join(user_data.get('target_areas', []))}")
-    
-    # Health Information
-    with st.expander("🥼 Health & Medical Information", expanded=True):
-        medical = user_data.get('medical_conditions', [])
-        st.write(f"**Medical Conditions:** {', '.join(medical) if medical else 'None'}")
-        st.write(f"**Taking Medications:** {user_data.get('taking_medications')}")
-        if user_data.get('medications_list'):
-            st.write(f"**Medications:** {user_data.get('medications_list')}")
-        limitations = user_data.get('physical_limitations', '')
-        st.write(f"**Physical Limitations:** {limitations if limitations else 'None reported'}")
-    
-    # Activity & Fitness
-    with st.expander("📊 Activity & Fitness Level", expanded=True):
-        st.write(f"**Activity Level:** {user_data.get('activity_level')}")
-        st.write(f"**Stress Level:** {user_data.get('stress_level')}")
-        st.write(f"**Sleep:** {user_data.get('sleep_hours')} hours/night ({user_data.get('sleep_quality')} quality)")
-        st.write(f"**Fitness Level:** {user_data.get('fitness_level')}")
-        if user_data.get('exercise_experience'):
-            st.write(f"**Experience:** {user_data.get('exercise_experience')}")
-    
-    # Workout Setup
-    with st.expander("🏋️ Fitness Environment & Schedule", expanded=True):
-        st.write(f"**Location:** {user_data.get('workout_location')}")
-        st.write(f"**Equipment:** {', '.join(user_data.get('available_equipment', []))}")
-        st.write(f"**Frequency:** {user_data.get('workout_frequency')} days/week")
-        st.write(f"**Session Duration:** {user_data.get('session_duration')}")
-        st.write(f"**Training Days:** {', '.join(user_data.get('selected_days', []))}")
-        st.write(f"**Preferred Time:** {user_data.get('preferred_time')}")
+    preferred_time = st.selectbox("Preferred Workout Time*", preferred_time_options)
     
     st.markdown("---")
-    st.info("💡 **Tip:** You can go back to edit any information using the '← Back' button")
     
-    col1, col2 = st.columns([1, 1])
+    # ============ FORM SUBMISSION ============
+    submitted = st.form_submit_button("✨ Generate My Personalized Plan", use_container_width=True)
     
-    with col1:
-        if st.button("← Back to Edit", use_container_width=True):
-            st.session_state.onboarding_step -= 1
-            st.rerun()
-    
-    with col2:
-        if st.button("✨ Generate My Plan", type="primary", use_container_width=True):
-            st.session_state.onboarding_step = 7
-            st.rerun()
+    if submitted:
+        # Validate required fields
+        validation_errors = []
+        
+        if not name:
+            validation_errors.append("❌ Name is required")
+        
+        if not target_areas:
+            validation_errors.append("❌ Please select at least one target area")
+        
+        if "Other" in medical_conditions and not medical_other:
+            validation_errors.append("❌ Please specify your other medical condition")
+        
+        if primary_goal == "Other" and not primary_goal_other:
+            validation_errors.append("❌ Please specify your primary goal")
+        
+        if len(selected_days) != days_per_week:
+            validation_errors.append(f"❌ Please select exactly {days_per_week} training days")
+        
+        if validation_errors:
+            st.error("### Please fix the following errors:")
+            for error in validation_errors:
+                st.error(error)
+        else:
+            # Build user profile dictionary
+            final_medical_conditions = medical_conditions.copy()
+            if "Other" in final_medical_conditions and medical_other:
+                final_medical_conditions.remove("Other")
+                final_medical_conditions.append(medical_other)
+            
+            final_primary_goal = primary_goal_other if primary_goal == "Other" else primary_goal
+            
+            user_profile = {
+                # Basic Info
+                "name": name,
+                "age": age,
+                "gender": gender,
+                "height": height,
+                "weight": weight,
+                "unit_system": unit_system,
+                "bmi": bmi,
+                "bmi_category": bmi_category,
+                
+                # Goals
+                "primary_goal": final_primary_goal,
+                "secondary_goals": secondary_goals,
+                "target_areas": target_areas,
+                "doctor_clearance": doctor_clearance,
+                "rehab_stage": rehab_stage,
+                
+                # Health
+                "medical_conditions": final_medical_conditions,
+                "takes_medication": takes_medication,
+                "medication_list": medication_list,
+                "physical_limitations": physical_limitations,
+                
+                # Activity
+                "current_activity": current_activity,
+                "stress_level": stress_level,
+                "sleep_hours": sleep_hours,
+                "sleep_quality": sleep_quality,
+                "fitness_level": fitness_level,
+                "previous_experience": previous_experience,
+                
+                # Environment
+                "workout_location": workout_location,
+                "available_equipment": available_equipment,
+                "days_per_week": days_per_week,
+                "session_duration": session_duration,
+                "selected_days": selected_days,
+                "training_days": selected_days,  # alias for compatibility
+                "preferred_time": preferred_time
+            }
+            
+            # Generate plan
+            with st.spinner("🎯 Analyzing your profile and generating your personalized fitness plan..."):
+                st.session_state.fitness_plan = fitness_advisor.generate_full_plan(user_profile)
+                st.session_state.user_profile = user_profile
 
-# ============ STEP 7: GENERATE & DISPLAY PLAN ============
-elif st.session_state.onboarding_step == 7:
-    st.title("🎉 Your Personalized Fitness Plan")
-    show_progress()
+# ============ DISPLAY GENERATED PLAN ============
+if st.session_state.fitness_plan:
+    st.success("✅ Your personalized fitness plan is ready!")
     
-    # Generate plan if not already generated
-    if 'fitness_plan' not in st.session_state:
-        with st.spinner("🔮 Creating your personalized fitness plan..."):
-            fitness_plan = fitness_advisor.generate_full_plan(st.session_state.user_data)
-            st.session_state.fitness_plan = fitness_plan
+    st.markdown("---")
     
     # Display the plan
     st.markdown(st.session_state.fitness_plan)
     
-    # Action buttons
     st.markdown("---")
-    col1, col2, col3 = st.columns(3)
     
-    with col1:
-        if st.button("📥 Download Plan", use_container_width=True):
-            st.download_button(
-                label="Download as Text File",
-                data=st.session_state.fitness_plan,
-                file_name=f"FriskaAi_Plan_{st.session_state.user_data.get('name', 'User')}.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
+    # Action buttons
+    col_actions = st.columns([1, 1, 1, 2])
     
-    with col2:
-        if st.button("🔄 Start Over", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
+    with col_actions[0]:
+        # Download button
+        plan_text = st.session_state.fitness_plan
+        st.download_button(
+            label="📥 Download Plan",
+            data=plan_text,
+            file_name=f"FriskaAi_Plan_{st.session_state.user_profile['name']}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+    
+    with col_actions[1]:
+        # Start over button
+        if st.button("🔄 Create New Plan", use_container_width=True):
+            st.session_state.fitness_plan = None
+            st.session_state.user_profile = None
             st.rerun()
     
-    with col3:
-        if st.button("✏️ Modify Profile", use_container_width=True):
-            st.session_state.onboarding_step = 1
-            if 'fitness_plan' in st.session_state:
-                del st.session_state['fitness_plan']
-            st.rerun()
+    with col_actions[2]:
+        # Print button (opens print dialog)
+        st.markdown(
+            """
+            <button onclick="window.print()" style="
+                background-color: #4CAF50;
+                border: none;
+                color: white;
+                padding: 8px 16px;
+                text-align: center;
+                text-decoration: none;
+                display: inline-block;
+                font-size: 14px;
+                margin: 4px 2px;
+                cursor: pointer;
+                border-radius: 4px;
+                width: 100%;
+            ">🖨️ Print Plan</button>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    st.markdown("---")
     
     # Feedback section
-    st.markdown("---")
-    st.markdown("### 💬 How do you like your plan?")
+    st.header("💬 Feedback")
+    st.markdown("**How satisfied are you with your personalized plan?**")
     
-    feedback = st.text_area(
-        "Share your feedback (optional)",
-        placeholder="Let us know what you think about your personalized plan...",
-        key="feedback_text"
+    feedback_cols = st.columns(5)
+    feedback_emoji = ["😞", "😐", "🙂", "😊", "🤩"]
+    feedback_text = ["Very Unsatisfied", "Unsatisfied", "Neutral", "Satisfied", "Very Satisfied"]
+    
+    for i, (col, emoji, text) in enumerate(zip(feedback_cols, feedback_emoji, feedback_text)):
+        with col:
+            if st.button(f"{emoji}\n{text}", key=f"feedback_{i}", use_container_width=True):
+                st.success(f"Thank you for your feedback! You rated: {text}")
+    
+    feedback_comments = st.text_area(
+        "Additional comments or suggestions (optional):",
+        placeholder="Tell us what you think about the plan..."
     )
     
-    if st.button("Submit Feedback", type="secondary"):
-        st.success("Thank you for your feedback! 🙏")
+    if st.button("Submit Feedback"):
+        if feedback_comments:
+            st.success("✅ Thank you for your feedback! We appreciate your input.")
+        else:
+            st.info("Feedback submitted!")
     
     st.markdown("---")
-    st.markdown("""
-    ### 🚀 Next Steps
-    1. **Save your plan** for easy reference
-    2. **Start with Week 1** and focus on form
-    3. **Track your progress** weekly
-    4. **Listen to your body** and adjust as needed
-    5. **Stay consistent** - results take time!
     
-    ### 📞 Need Help?
-    - Consult your doctor before starting any new exercise program
-    - Work with a certified trainer for proper form guidance
-    - Stop immediately if you experience sharp pain
-    
-    **Good luck on your fitness journey! 💪**
+    # Safety reminder
+    st.info("""
+    ### ⚠️ Important Safety Reminders
+    - Always consult with your healthcare provider before starting a new exercise program
+    - Stop immediately if you experience pain, dizziness, or unusual discomfort
+    - Stay hydrated and listen to your body
+    - If you have medical conditions, follow your doctor's recommendations
+    - Progress gradually and don't rush
     """)
+    
+    # Disclaimer
+    st.markdown("---")
+    st.caption("""
+    **Disclaimer:** This fitness plan is generated based on the information you provided and is for informational purposes only. 
+    It is not a substitute for professional medical advice, diagnosis, or treatment. Always seek the advice of your physician 
+    or other qualified health provider with any questions you may have regarding a medical condition or exercise program.
+    """)
+
+else:
+    # Show welcome message when no plan is generated
+    st.markdown("---")
+    st.info("👆 Please fill out the form above to generate your personalized fitness plan!")
+    
+    # Show some benefits
+    st.markdown("### 🌟 What You'll Get:")
+    benefit_cols = st.columns(3)
+    
+    with benefit_cols[0]:
+        st.markdown("""
+        **🎯 Personalized Plan**
+        - Tailored to your goals
+        - Adapted to your fitness level
+        - Safe for your conditions
+        """)
+    
+    with benefit_cols[1]:
+        st.markdown("""
+        **📅 Structured Schedule**
+        - Day-by-day workouts
+        - Progressive training
+        - Flexible timing
+        """)
+    
+    with benefit_cols[2]:
+        st.markdown("""
+        **🏥 Medical Safety**
+        - Condition-specific adaptations
+        - Safe exercise selection
+        - Professional guidance
+        """)
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; color: gray; padding: 20px;'>
+    <p><strong>FriskaAi - Smart Fitness Advisor</strong></p>
+    <p>Powered by AI | Designed for Your Health & Wellness</p>
+    <p>© 2025 FriskaAi. All rights reserved.</p>
+</div>
+""", unsafe_allow_html=True)
