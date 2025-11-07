@@ -1,0 +1,468 @@
+async def generate_meal_plan(self, query: str, chat_history: List[Dict], constraints: Dict, calorie_target_for_llm: Optional[int], num_meals: int, is_modification: bool, user_goal: str, previous_day_meal_plan: Optional[str] = None, original_plan_context: Optional[str] = None, avoid_foods: Optional[List[str]] = None, recommended_foods: Optional[List[str]] = None, eaten_foods_text: Optional[str] = None, specific_meal_to_modify: Optional[str] = None, meal_type_to_update: Optional[str] = None, abnormal_test_ranges: Optional[Dict] = None, meal_calorie_distribution: Optional[Dict] = None, **kwargs) -> ToolResult:
+        base_system_prompt = self._build_system_prompt(
+            query=query,
+            chat_history=chat_history,
+            constraints=constraints,
+            calorie_target_for_llm=calorie_target_for_llm,
+            num_meals=num_meals,
+            is_modification=is_modification,
+            user_goal=user_goal,
+            previous_day_meal_plan=previous_day_meal_plan,
+            original_plan_context=original_plan_context,
+            avoid_foods=avoid_foods,
+            abnormal_test_ranges=abnormal_test_ranges,
+            eaten_foods_text=eaten_foods_text,
+            meal_type_to_update=meal_type_to_update,
+            specific_meal_to_modify=specific_meal_to_modify,
+            meal_calorie_distribution=meal_calorie_distribution,
+            **kwargs
+        )
+ 
+        if is_modification or not meal_calorie_distribution:
+             # Fallback to single sequential call for complex modifications or if distribution is missing
+            logger.info("Modification request or missing calorie distribution, using sequential generation.")
+            user_llm_prompt = f"Generate a complete one-day meal plan based on the detailed instructions in the system prompt and the user's profile. The user's specific request is: \"{query}\""
+            if is_modification:
+                user_llm_prompt = f"This is a **modification request**. The user wants to change the previous meal plan. Base the new plan on the provided profile and this new request: '{query}'"
+ 
+            raw_llm_response = await self.llm_service.query(user_llm_prompt, base_system_prompt, chat_history, max_tokens=3500, temperature=0.4)
+        else:
+            logger.info("New meal plan request. Generating meal parts in parallel.")
+            tasks = []
+            meal_services = {
+                "Breakfast": self.breakfast_llm,
+                "Morning Snack": self.morning_snack_llm,
+                "Lunch": self.lunch_llm,
+                "Evening Snack": self.evening_snack_llm,
+                "Dinner": self.dinner_llm,
+            }
+ 
+            for meal_name, calorie_target in meal_calorie_distribution.items():
+                if meal_name in meal_services:
+                    task = self._generate_single_meal_part(
+                        meal_name=meal_name,
+                        meal_llm_service=meal_services[meal_name],
+                        base_system_prompt=base_system_prompt,
+                        meal_calorie_target=calorie_target,
+                        chat_history=[]
+                    )
+                    tasks.append(task)
+           
+            meal_parts_results = await asyncio.gather(*tasks)
+ 
+            # Combine the results into a single meal plan text
+            meal_plan_without_notes = "Here is your meal plan based on your preferences and health needs:\n\n" + "\n\n".join(meal_parts_results)
+           
+            # NEW: Make a dedicated, separate call to generate the detailed notes
+            logger.info("Parallel meal generation complete. Generating condition-specific notes.")
+            notes_section = await self._generate_condition_specific_notes(
+                full_meal_plan=meal_plan_without_notes,
+                constraints=constraints,
+                chat_history=[]
+            )
+ 
+            # Combine the plan text and the newly generated notes section
+            raw_llm_response = f"{meal_plan_without_notes}\n\n{notes_section}"
+ 
+ 
+        if "WARNING" in raw_llm_response:
+            return ToolResult(
+                success=True,
+                data={"answer": raw_llm_response},
+                metadata={"is_safety_warning": True, "is_meal_plan": False}
+            )
+        if not raw_llm_response or "Total calories for" not in raw_llm_response:
+            return ToolResult(success=False, data=None, error="I could not generate a valid meal plan at this moment. Please try again.")
+ 
+        processed_meal_plan_text = self._process_llm_plan_formatting(raw_llm_response)
+        structured_plan = self._parse_meal_plan_text_to_json(processed_meal_plan_text)
+ 
+        # Recalculate totals after combining parallel results
+        if not is_modification and meal_calorie_distribution:
+            processed_meal_plan_text = agent._recalculate_and_format_plan_summary(processed_meal_plan_text)
+            structured_plan = self._parse_meal_plan_text_to_json(processed_meal_plan_text)
+ 
+        metadata = {
+            "is_meal_plan": True,
+            "calorie_target_achieved": structured_plan.get("total_nutrients", {}).get("Calories"),
+            "calorie_target_requested": calorie_target_for_llm,
+            "is_modification_response": is_modification,
+            "pending_meal_plan_for_save": processed_meal_plan_text,
+            "awaiting_db_confirmation": True,
+            "plan_type": "DAILY"
+        }
+ 
+        return ToolResult(
+            success=True,
+            data={"meal_plan_text": processed_meal_plan_text, "meal_plan_json": structured_plan},
+            metadata=metadata
+        )
+ 
+    async def execute(self, meal_calorie_distribution: Optional[Dict] = None, **kwargs) -> ToolResult:
+        query = kwargs.get("query")
+        chat_history = kwargs.get("chat_history")
+        constraints = kwargs.get("constraints")
+        last_agent_context = kwargs.get("last_agent_context", {})
+        final_calorie_target_for_llm_prompt = kwargs.get("calorie_target")
+        user_goal = kwargs.get("user_goal", "maintenance")
+        avoid_foods = kwargs.get("avoid_foods", [])    
+        previous_day_meal_plan = last_agent_context.get("previous_day_meal_plan")
+        num_meals = kwargs.get("num_meals", 5)
+        eaten_calories_text = kwargs.get('eaten_calories_text')
+ 
+        eaten_calories_kwargs = {'eaten_calories_text': eaten_calories_text}
+ 
+        is_modification = False
+        specific_meal_to_modify = None
+        if chat_history:
+            recent_history_text = " ".join(msg['content'].lower() for msg in chat_history[-2:])
+            if "meal plan" in recent_history_text or (last_agent_context and last_agent_context.get("is_meal_plan")):
+                if any(keyword in query.lower() for keyword in ["change", "modify", "replace", "swap", "adjust", "different", "instead of", "update", "remove", "add", "more"]):
+                    is_modification = True
+                    meal_type_match = re.search(r'\b(breakfast|morning snack|lunch|evening snack|dinner|snack)\b', query.lower())
+                    if meal_type_match:
+                        specific_meal_to_modify = meal_type_match.group(1).title()
+                        if specific_meal_to_modify == "Snack":
+                            specific_meal_to_modify = "Morning Snack"
+        if last_agent_context.get("eaten_foods_text"):
+            is_modification = True
+        if final_calorie_target_for_llm_prompt is None and is_modification and last_agent_context:
+            prev_target = last_agent_context.get("calorie_target_achieved") or last_agent_context.get("calorie_target_requested")
+            if prev_target and prev_target > 500:
+                final_calorie_target_for_llm_prompt = prev_target
+        original_plan_context = last_agent_context.get("active_meal_plan") or last_agent_context.get("pending_meal_plan_for_save")
+       
+        return await self.generate_meal_plan(
+            query=query,
+            chat_history=chat_history,
+            constraints=constraints,
+            calorie_target_for_llm=final_calorie_target_for_llm_prompt,
+            num_meals=num_meals,
+            is_modification=is_modification,
+            user_goal=user_goal,
+            previous_day_meal_plan=previous_day_meal_plan,
+            original_plan_context=original_plan_context,
+            avoid_foods=avoid_foods,
+            eaten_foods_text=kwargs.get("eaten_foods_text"),
+            meal_type_to_update=kwargs.get("meal_type_to_update"),
+            specific_meal_to_modify=specific_meal_to_modify,
+            recommended_foods=kwargs.get("recommended_foods", []),
+            abnormal_test_ranges=kwargs.get("abnormal_test_ranges", {}),
+            meal_calorie_distribution=meal_calorie_distribution,
+            **eaten_calories_kwargs
+        )
+       
+    def _build_system_prompt(self, query: str, chat_history: List[Dict], constraints: Dict, calorie_target_for_llm: Optional[float], num_meals: int, is_modification: bool, user_goal: str, previous_day_meal_plan: Optional[str] = None, original_plan_context: Optional[str] = None, avoid_foods: Optional[List[str]] = None, recommended_foods: Optional[List[str]] = None, abnormal_test_ranges: Optional[Dict] = None, meal_calorie_distribution: Optional[Dict] = None, eaten_foods_text: Optional[str] = None, meal_type_to_update: Optional[str] = None, eaten_calories: int = 0, specific_meal_to_modify: Optional[str] = None, **kwargs) -> str:
+        meal_structures = {
+            3: ["Breakfast", "Lunch", "Dinner"],
+            4: ["Breakfast", "Lunch", "Evening Snack", "Dinner"],
+            5: ["Breakfast", "Morning Snack", "Lunch", "Evening Snack", "Dinner"]
+        }
+        calorie_distribution_rules = {
+            3: "- **Breakfast:** 30-35%\n- **Lunch:** 40-45%\n- **Dinner:** 25-30%",
+            4: "- **Breakfast:** 25-30%\n- **Lunch:** 35-40%\n- **Evening Snack:** 5-10%\n- **Dinner:** 25-30%",
+            5: "- **Breakfast:** 27-30%\n- **Morning Snack:** 5-10%\n- **Lunch:** 37-40%\n- **Evening Snack:** 7-10%\n- **Dinner:** 21-25%"
+        }
+        eaten_calories_text = kwargs.get('eaten_calories_kwargs')
+        requested_meals = meal_structures.get(num_meals, meal_structures[5])
+        calorie_rules = calorie_distribution_rules.get(num_meals, calorie_distribution_rules[5])      
+        mandatory_structure_text = "\n".join([f"{i+1}. `**{meal}**`" for i, meal in enumerate(requested_meals)])
+ 
+        profile_details = []
+        if constraints.get('gender'): profile_details.append(f"- Gender: {constraints['gender']}")
+        if constraints.get('age'): profile_details.append(f"- Age: {constraints['age']} years")
+        if constraints.get('weight_kg'): profile_details.append(f"- Weight: {constraints['weight_kg']} kg")
+        if constraints.get('height_cm'): profile_details.append(f"- Height: {constraints['height_cm']:.1f} cm")
+        if constraints.get('bmi'): profile_details.append(f"- BMI: {constraints['bmi']:.1f}")
+        if calorie_target_for_llm:
+            profile_details.append(f"- **Calorie Goal for this Plan: {calorie_target_for_llm:.0f} kcal** (This has been adjusted based on your profile and goal of '{user_goal}')")
+        if constraints.get('activity_level'): profile_details.append(f"- Activity Level: {constraints['activity_level']}")
+        if constraints.get('dietary_preference'): profile_details.append(f"- Dietary Preference: {constraints['dietary_preference']}")
+        if constraints.get('cuisine'): profile_details.append(f"- Preferred Cuisine: {constraints['cuisine']}")
+        all_restrictions = constraints.get('restrictions', [])
+        if constraints.get('allergies'):
+            profile_details.append(f"- **CRITICAL ALLERGIES (MUST AVOID): {', '.join(constraints['allergies'])}**")
+        if constraints.get('medical_conditions'):
+            profile_details.append(f"- **MEDICAL CONDITIONS TO MANAGE: {', '.join(constraints['medical_conditions'])}**")
+        if all_restrictions:
+            profile_details.append(f"- Other Dietary Restrictions: {', '.join(all_restrictions)}")
+        if avoid_foods:
+            profile_details.append(f"- **FOODS TO AVOID (Based on conditions): {', '.join(avoid_foods)}**")
+        if constraints.get('vitals_numeric'):
+            vitals_str = ", ".join([f"{k}: {v}" for k, v in constraints['vitals_numeric'].items()])
+            profile_details.append(f"- Vital Signs: {vitals_str}")
+        if constraints.get('digestive_issues'):
+            profile_details.append(f"- **Digestive Issues to Consider:** {', '.join(constraints['digestive_issues'])}")
+        if recommended_foods:
+            profile_details.append(f"- **RECOMMENDED FOODS (From Blood Report): {', '.join(recommended_foods)}**")
+        if abnormal_test_ranges:
+            ranges_str = ", ".join([f"{k}: {v['value']} ({v['status']})" for k, v in abnormal_test_ranges.items()])
+            profile_details.append(f"- **KEY BLOOD REPORT FINDINGS: {ranges_str}**")
+       
+        if previous_day_meal_plan:
+            profile_details.append(f"\n- **Previous Day's Meal Plan (for variety):**\n{previous_day_meal_plan}")
+ 
+        profile_summary = "\n".join(profile_details)
+        prompt_parts = [
+            "You are Friska, a world-class responsible AI nutritionist. Your primary goal is to create a safe, effective, and meticulously formatted personalized meal plan based on **strict scientific and user-provided constraints.** Your performance is judged solely on your ability to follow every rule precisely. You MUST respond ONLY in English."
+        ]
+        prompt_parts.append(f"""
+**0. ABSOLUTE TOP PRIORITY: THE {num_meals}-MEAL STRUCTURE**
+Your single most important task is to generate a complete {num_meals}-part meal plan. Your entire response MUST contain all of the following sections, in order. A plan is considered a complete failure if it is missing any section. Before you output anything, mentally confirm you have a plan for all required sections.
+ 
+{mandatory_structure_text}
+""")
+        prompt_parts.append(f"""
+**1. USER PROFILE & TARGETS (Non-negotiable):**
+{profile_summary}
+This profile information is derived from our trusted data sources. You must adhere to the constraints it implies.
+""")
+       
+        prompt_parts.append(f"""
+**2. MEAL VARIETY (CRITICAL):**
+- You **MUST** ensure the new meal plan is significantly different from the "Previous Day's Meal Plan" provided.
+- **DO NOT** repeat the same food items. Introduce new, healthy, and appropriate alternatives for every meal. This is a primary requirement for user satisfaction.
+- **NO REPETITION WITHIN THE SAME DAY:** You **MUST** ensure that no meal or food item is repeated within the same day's meal plan. Each breakfast, lunch, dinner, and snack must contain completely different food items.
+""")
+        is_diabetic = any('diabetes' in cond.lower() for cond in constraints.get('medical_conditions', []))
+ 
+        if is_diabetic:
+            logger.info("Diabetes detected. Applying specific macronutrient rules.")
+            macro_distribution_rules = """
+               - **Carbohydrates:** **MUST** be in the range of 45% to 50% of total daily calories.
+               - **Protein:** **MUST** be in the range of 15% to 25% of total daily calories.
+               - **Fat:** **MUST** be in the range of 25% to 35% of total daily calories."""
+   
+        else:
+            logger.info("No diabetes detected. Using default macronutrient rules.")
+            macro_distribution_rules = """
+               - **Carbohydrates:** **MUST** be in the range of 45% to 60% of total daily calories.
+               - **Protein:** **MUST** be in the range of 10% to 35% of total daily calories.
+               - **Fat:** **MUST** be in the range of 20% to 35% of total daily calories."""
+           
+        rule_2_text = ""
+        if meal_calorie_distribution:
+            # Create the comma-separated string of meal targets
+            meal_distribution_text = ", ".join([f"'{meal}': {calories} kcal" for meal, calories in meal_calorie_distribution.items()])
+           
+            # This line will print the meal distribution to your terminal
+            print(f"DEBUG: Meal calorie distribution for prompt: {meal_distribution_text}")
+ 
+            # Create the new, more directive and procedural rule
+            rule_2_text = f"""- **RULE 2: EXACT MEAL CALORIE PROCEDURE (NON-NEGOTIABLE):**
+    The total calories for each meal **MUST** meet the following targets exactly: {meal_distribution_text}. This rule is just as important as the total daily calorie goal. To achieve this, you **MUST** adjust the `Portion Weight` (in grams) of the food items within each meal.
+   
+    **MANDATORY VERIFICATION STEP:** Before outputting your response, you **MUST** mathematically verify that the sum of calories for the items in each meal equals its target. If a meal's total is incorrect, you **MUST** adjust portion sizes and recalculate until the target is met. Do not proceed until this rule is satisfied for all meals."""
+ 
+            # ADD THESE LINES TO PRINT THE FULL TEXT
+            print("\n--- DEBUG: Content of rule_2_text ---")
+            print(rule_2_text)
+            print("-------------------------------------\n")
+       
+       
+        if constraints.get('cuisine'):
+            cuisine = constraints['cuisine']
+            cuisine_instruction = "If the user has specified a preferred Cuisine in their profile, integrate 4-6 appropriate food items from that cuisine into the meal plan in breakfast, lunch, dinner, ensuring they align with all other dietary and health constraints."
+            prompt_parts.append(f"""
+**3. CUISINE INTEGRATION (MANDATORY):**
+- The user's preferred cuisine is **{cuisine}**.
+- You **MUST** build the entire meal plan using appropriate and healthy dishes from **{cuisine}** cuisine.
+- **Specific Instruction:** {cuisine_instruction}
+- All meal items (Breakfast, Lunch, Dinner) **MUST** be authentic to this cuisine while still meeting all health constraints. This is not an optional suggestion; it is a primary requirement.
+""")
+       
+        prompt_parts.append(f"""
+**4. CORE DIRECTIVES (THESE ARE MANDATORY RULES):**
+ 
+    A. CALORIE & NUTRIENT TARGETING (ABSOLUTELY CRITICAL):
+    - **Compulsory Goal:** The final "Daily Total Calories" of the generated meal plan **MUST** be within **10 kcal** of the **Final Daily Calorie Target** of **{f'{calorie_target_for_llm:.0f}' if calorie_target_for_llm else '2000'} kcal**. There is no flexibility on this.
+    - **Steps to Achieve Goal:** You **MUST** carefully calculate and scale the portion sizes (in grams) for each food item and for each liquid iteams you must have to calculate it in ounce (or ml) to perfectly meet the calorie target AND all distribution rules below.
+    - **Verification and Validation:** Before providing a response, you **MUST** mathematically double-check that your entire plan adheres to ALL of the following rules. Failure to comply will result in an incorrect output.
+    - **Adjustment Focus:** When adjusting portion sizes to meet the total daily calorie and macronutrient targets, prioritize making changes to the items in **Lunch** and **Dinner**. Make smaller adjustments to Breakfast and Snacks only if necessary.
+    - **Plan Completeness:** You MUST generate a complete 5-part meal plan including **Breakfast, Morning Snack, Lunch, Evening Snack, and Dinner**. A plan without all five sections is considered a failure and is unacceptable. Double-check your output to ensure Dinner is always included. This is **MENDATORY** rule.
+ 
+    - **RULE 1: STRICT OVERALL MACRONUTRIENT DISTRIBUTION (MUST BE FOLLOWED):**
+       {macro_distribution_rules}
+       
+    {rule_2_text}
+ 
+    B. SAFETY AND CONSTRAINT ADHERENCE (ABSOLUTELY CRITICAL):
+    - **CRITICAL SAFETY DIRECTIVE: Before responding, you MUST double-check that NO food items from the user's ALLERGIES or the `FOODS TO AVOID` list appear anywhere in the meal plan. Including any of these items is a critical failure of the task.**
+    - **RESTRICTED** to include any food item listed in the user's **ALLERGIES** and **Dietary Restrictions**{f" except for the ones specifically mentioned by the user for {meal_type_to_update} if it's a modification." if eaten_foods_text else ""}.
+    - **RESTRICTED** to include any food that contradicts the user's **MEDICAL CONDITIONS**, **DIGESTIVE ISSUES**, or is in the **FOODS TO AVOID** list. For example: a diabetic user, strictly avoid high-sugar items and refined carbohydrates like white bread. If the user had the nut allergy avoid all the nuts and almonds in the meal plan.
+ 
+    - **For Diabetic Patients (STRICT GUIDELINES IF 'Diabetes' is in MEDICAL CONDITIONS):**
+    - If the user explicitly asks for a food that violates these constraints, you **MUST WARN**. Your response should be firm, extremely polite, and explain the health-related reason. For example: "I cannot add food item name to your plan because your profile indicates a allergy, digestive issue, medical conditio, etc. Your safety is my top priority."
+ 
+""")
+ 
+        medical_conditions = constraints.get('medical_conditions', [])
+        for condition in medical_conditions:
+            for key, condition_prompt in MEDICAL_CONDITION_PROMPTS.items():
+                if key.lower() in condition.lower() or condition.lower() in key.lower():
+                    prompt_parts.append(f"""
+    **Condition-Specific Nutrition Rules for {key}:**
+    {condition_prompt}
+    """)
+                    break
+        diabetes_triggers = {
+            "Diabetes",
+            "Diabetes Mellitus",
+            "Type 1 Diabetes (T1DM)",
+            "Type 2 Diabetes (T2DM)",
+            "Gestational Diabetes",
+            "Prediabetes / Impaired Glucose Tolerance (IGT)"
+            "Nut Allergy"
+            }
+ 
+        medical_conditions = constraints.get('medical_conditions', [])
+        diabetes_triggers = {
+            "Diabetes", "Diabetes Mellitus", "Type 1 Diabetes (T1DM)", "Type 2 Diabetes (T2DM)",
+            "Gestational Diabetes", "Prediabetes / Impaired Glucose Tolerance (IGT)"
+        }
+        nut_allergy_triggers = {"Nut Allergy", "Tree Nuts", "Peanuts"}
+ 
+        if any(trigger in user_condition for trigger in diabetes_triggers for user_condition in medical_conditions):
+            prompt_parts.append("""
+            "Sugar and Food Product Restrictions",
+            "Completely avoid simple sugars such as refined sugar, honey, jaggery, brown sugar, maple syrup, dates, date sugar, and fruit juices.",
+            "Avoid all packaged and instant food products.",
+            "Include only food items with a glycemic index (GI) below 60 and a glycemic load (GL) of 11 or less.",
+           
+            "Macronutrient and Meal Composition",
+            "Emphasize plant-based foods, comprising 50% of the plate, with 25% lean protein and 25% healthy fats.",
+            "Design the meal plan to be more plant-based than animal-based.",
+           
+            " Fiber Intake",
+            "Ensure that the total daily fiber intake is at least 35 grams.",
+            "Distribute fiber-rich foods evenly throughout the day by including 5–8 grams of fiber in each main meal using vegetables, legumes, flaxseeds, oats, and fruits with edible skin.",
+            "Incorporate fiber content calculation into the meal plan and prioritize the inclusion of fiber-rich foods.",
+ 
+            " Non-Vegetarian Food Guidelines",
+            "Include non-vegetarian food only once a day. Avoid butter-rich gravies; prefer grilled or salad-based preparations.",
+            "In non-vegetarian options, avoid red meat (e.g., mutton) and organ meats (e.g., liver).",
+            "Grilled chicken, grilled fish, chicken salads, fish salads, and egg whites are allowed up to three times a week.",
+ 
+            "Fruit and Vegetable Guidelines",
+            "Avoid high-sugar fruits such as bananas, mangoes, sapodilla (chikoo), dates, and grapes.",
+            "Avoid high-starch vegetables like potatoes, sweet potatoes, jackfruit, and other roots and tubers.",
+            "Fruits must be consumed in combination with nuts or seeds (e.g., 1 fruit with 4–5 nuts) to prevent blood sugar spikes.",
+           
+            "Beverage and Meal Planning",
+            "Include green tea or herbal tea during mid-morning or evening, paired with nuts or seeds. Do not include them with main meals.",
+            "Recommend simple, easy-to-prepare food items rather than complex recipes.",
+            "Clearly mention portion sizes for all food items using standardized units (e.g., cups, grams, ounces, slices) and avoid vague terms like 'serving'."
+""")
+        if any(trigger in user_condition for trigger in nut_allergy_triggers for user_condition in medical_conditions) or any(trigger in user_allergy for trigger in nut_allergy_triggers for user_allergy in constraints.get('allergies', [])):
+            prompt_parts.append("""
+            "Avoid all nuts and nut products, including peanut butter, almond milk, and nut-based snacks.",
+            "Include alternative sources of healthy fats, such as olive oil, avocado, and seeds.",
+            "Ensure that all packaged foods are checked for hidden nut ingredients."
+            """)
+           
+        dietary_pref_string = constraints.get('dietary_preference', 'None')
+        if isinstance(dietary_pref_string, list):
+             dietary_pref_string = ", ".join(dietary_pref_string)
+ 
+        prompt_parts.append(f"""
+    - **DIETARY PREFERENCE (ABSOLUTELY CRITICAL - NO EXCEPTIONS):**
+    - The user's stated preferences are: **{dietary_pref_string}**.
+    - You **MUST** ensure every single food item in the plan strictly adheres to ALL of these preferences.
+    - For example, if the preferences are "Non vegetarian, Halal, No Pork", your plan MUST include non-vegetarian items, but all items MUST be Halal and contain NO pork.
+    - If the preferences are "Vegetarian, Kosher", all items MUST be vegetarian AND Kosher.
+    - This preference list **ABSOLUTELY SUPERSEDES** any general cuisine or food suggestions.
+""")
+        prompt_parts.append(f"""
+    C. STRICT OUTPUT FORMATTING (ABSOLUTELY CRITICAL):
+    - You **MUST** follow this format precisely. No extra text or conversation before or after the plan.
+    - Start the response with: `Here is your meal plan based on your preferences and health needs:`
+    - Meal headers MUST be enclosed in double asterisks on their own line (e.g., `**Breakfast**`).
+    - For each meal, provide 2-4 food items. Each item must be on a new line starting with a hyphen.
+    - **CRITICAL UNIT INSTRUCTION: You MUST use US customary units for the primary portion description.**
+        - For liquids, use `fluid ounces (fl oz)` or `cups`. [cite: 5]
+        - For solid weights, use `ounces (oz)`. [cite: 3]
+        - For smaller amounts, `tablespoons (Tbsp)` or `teaspoons (tsp)` are acceptable. [cite: 5]
+        - You **MUST** also keep the `Portion Weight` in grams (`g`) for backend processing.
+    - **EACH food item MUST have a full, pipe-separated nutritional breakdown.** The format for each food item is:
+        `- Food Name (Portion) | Portion Weight: XXg | Protein: XXg | Carbs: XXg | Fat: XXg | Fiber: XXg | Sodium: XXmg | Iodine: XXmcg | Sugar: XXg | Cholesterol: XXmg | Calories: XXkcal`  
+    - After the items for each meal, you **MUST** include a meal summary line in this format:
+        `Total calories for [Meal Name]: XXX.X kcal\nMacronutrient Ratio: Protein XX.X%, Carbs XX.X%, Fat XX.X%`
+    - `**Daily Total Calories:**` (State the final calculated calorie total.)
+    - `**Overall Macronutrient Distribution:**` (Provide the final calculated percentage breakdown for Protein, Carbohydrates, and Fat for the entire day.)
+    - Condition-Specific Notes (MANDATORY)
+      You MUST provide 3-5 brief, actionable tips relevant to the user's profile. Generate them using the following priority system:
+        1.  **Top Priority - Medical Condition:** If the user has a `medical_condition`, your first tip MUST be a practical dietary recommendation directly related to managing that condition.
+        2.  **Second Priority - Allergies:** If the user has an `allergy`, your next tip MUST be a practical piece of advice for avoiding that allergen. (e.g., For a Nut Allergy: "Always read food labels carefully, as nuts can be a hidden ingredient in sauces and dressings.").
+        3.  **General Wellness:** Add 1-2 additional general health tips that are always beneficial, such as the importance of staying hydrated, eating mindfully, or ensuring adequate fiber intake.
+    - You MUST use the exact heading: `**Condition-Specific Notes:**`
+    - Each tip MUST be on a new line and start with a hyphen (`-`).
+ 
+**5. FINAL CHECK BEFORE RESPONDING:**
+- Review the entire plan you have created.
+- Does the `Daily Total Calories` match the target?
+- Is the overall macronutrient distribution within the ranges specified in RULE 1?
+- Is the calorie distribution for each meal correct according to RULE 2?
+- If any rule is violated, you MUST correct the plan before presenting it.
+ 
+**6. TASK:**
+- If this is a **new plan**, generate a complete one-day meal plan adhering to all directives.
+- If this is a **modification request**, create a **completely new and updated** one-day meal plan that incorporates the user's request while still adhering to all rules.
+""")
+ 
+        if eaten_foods_text and meal_type_to_update and calorie_target_for_llm and original_plan_context:
+            remaining_target = calorie_target_for_llm - eaten_calories
+            meal_order = ["Breakfast", "Morning Snack", "Lunch", "Evening Snack", "Dinner"]
+            normalized_meal_type = re.sub(r'snacks', 'snack', meal_type_to_update, flags=re.IGNORECASE).title()
+ 
+            try:
+                current_meal_index = meal_order.index(normalized_meal_type)
+                past_meals = meal_order[:current_meal_index]
+                future_meals = meal_order[current_meal_index + 1:]
+ 
+                prompt_parts.append(f"""
+**D. MEAL CHECK-IN ADJUSTMENT (CRITICAL INSTRUCTION):**
+- The user has already consumed {eaten_calories:.0f} kcal today, including a custom meal for **{meal_type_to_update}**.
+- Your task is to generate a **new, complete, and intelligently adjusted plan for the entire day**.
+ 
+- **Step 1 (Past Meals):** For all meals that occurred *before* {meal_type_to_update} (i.e., {', '.join(past_meals) if past_meals else 'None'}), you **MUST** copy them exactly from the `Original Meal Plan for reference` below without any changes.
+- **Step 2 (Current Meal):** In the `{meal_type_to_update}` section, list the meal the user ate: "{eaten_foods_text}". **Do not adjust its portion or nutritional values.**
+- **Step 3 (Future Meals):** For all meals that come *after* {meal_type_to_update} (i.e., {', '.join(future_meals) if future_meals else 'None'}), you must create new meals or adjust their portion sizes. The combined total calories for these future meals **MUST** be approximately **{remaining_target:.0f} kcal**.
+- **Step 4 (Final Goal):** The final `**Daily Total Calories:**` at the end of the complete plan MUST be very close to **{calorie_target_for_llm:.0f} kcal**.
+ 
+**Original Meal Plan for reference (use this for past meals):**
+{original_plan_context}
+""")
+            except ValueError:
+                logger.error(f"Could not find normalized meal type '{normalized_meal_type}' in meal_order list. Skipping meal plan adjustment logic.")
+ 
+        elif specific_meal_to_modify and original_plan_context:
+            prompt_parts.append(f"""
+**D. SPECIFIC MEAL MODIFICATION (CRITICAL INSTRUCTION):**
+- **PRIMARY DIRECTIVE:** The user wants to modify their plan with this request: "{query}".
+- Your top priority is to fulfill this modification request **for the meal specified: {specific_meal_to_modify}**.
+- **ENFORCE SAFETY:** You **MUST NOT** override **ALLERGIES** or critical **MEDICAL CONDITION** restrictions (like 'Diabetes' rules, 'Hypertension' sodium limits). These safety rules ALWAYS take precedence.
+- The target meal to modify is **{specific_meal_to_modify}**.
+ 
+**MODIFICATION WORKFLOW (MANDATORY):**
+ 
+1.  **SAFETY CHECK (ALLERGIES/MEDICAL):**
+    - Analyze the user's request: "{query}".
+    - Check if the requested foods violate any **ALLERGIES**: {', '.join(constraints.get('allergies', []))} or strict **MEDICAL CONDITION** rules (e.g., adding a sugary item for a Diabetic).
+    - **If a safety violation is detected, you MUST refuse.** Respond ONLY with a polite refusal explaining the safety reason (e.g., "I cannot add peanuts due to your allergy."). Do not generate a meal plan.
+ 
+2.  **SAFETY CHECK (ALLERGIES/MEDICAL/DIETARY PREFERENCES):**
+        * Analyze the user's request: "{query}".
+        * **CRITICAL:** Check if the requested foods violate any **ALLERGIES**: {constraints.get('allergies', [])} or strict **MEDICAL CONDITION** rules (e.g., adding sugar for Diabetes).
+            * **CRITICAL:** Check if the request conflicts with the user's **DIETARY PREFERENCE**: {constraints.get('dietary_preference', 'None')}.
+            * **If a safety violation is detected, you MUST refuse.** Respond ONLY with a polite refusal explaining the safety reason (e.g., "I cannot add peanuts due to your allergy.").
+            * **If a violation is found, reply with a polite refusal message and DO NOT proceed further.**
+ 
+3.  **RECALCULATE & ADJUST:** After making the specific change, recalculate the totals for the modified meal and the entire day. Adjust portion sizes of **OTHER existing items** to ensure the final `Daily Total Calories` remains close to the target ({calorie_target_for_llm or 'original target'} kcal).
+ 
+**Original Meal Plan for reference (use this for other meals):**
+{original_plan_context}
+ 
+**Remember:** Safety rules (Allergies, Medical Conditions) are paramount and cannot be overridden. You should only be receiving this prompt if the request does *not* conflict with the user's saved dietary preferences.
+""")
+        # logger.info(f"prompt {' '.join(prompt_parts)}")
+        return "\n".join(prompt_parts)

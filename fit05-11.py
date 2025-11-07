@@ -278,22 +278,30 @@ class FitnessAdvisor:
         
         return "Low" if medical and medical != ["none"] else "None"
 
-    def get_condition_guidelines(self, medical_conditions: List[str]) -> str:
-        """Return full Excel-based instructions for each condition selected."""
+    def get_condition_guidelines(self, medical_conditions: list) -> str:
+        """Generate detailed condition-specific exercise guidelines from Excel data"""
+        if not medical_conditions or medical_conditions == ["None"]:
+            return "No medical conditions reported. Standard exercise protocols apply."
+        
         guidelines = []
-        for cond in medical_conditions:
-            matches = condition_data[condition_data["Condition"].str.contains(cond, case=False, na=False)]
+        
+        for condition in medical_conditions:
+            # Look up in your Excel data
+            matches = condition_data[condition_data["Condition"].str.contains(condition, case=False, na=False)]
             for _, row in matches.iterrows():
-                guidelines.append(
-                    f"🩺 Condition: {row['Condition']}\n"
-                    f"- Contraindicated Exercises: {row['Contraindicated Exercises']}\n"
-                    f"- Modified / Safer Exercises: {row['Modified / Safer Exercises']}\n"
-                    f"- Exercise Type: {row['Exercise Type']}\n"
-                    f"- Affected Body Region: {row['Affected Body Region']}\n"
-                    f"- Intensity Limit: {row['Intensity Limit']}\n"
-                )
+                guideline = f"""
+    🏥 **{row['Condition']}:**
+    - ❌ Contraindicated Exercises: {row['Contraindicated Exercises']}
+    - ✅ Modified/Safer Exercises: {row['Modified / Safer Exercises']}
+    - 🎯 Exercise Type: {row['Exercise Type']}
+    - 🫀 Affected Body Region: {row['Affected Body Region']}
+    - 📊 Intensity Limit: {row['Intensity Limit']}
+    """
+                guidelines.append(guideline)
+        
         if not guidelines:
-            return "No condition-specific restrictions or modifications."
+            return f"Medical conditions noted: {', '.join(medical_conditions)}\nNo specific contraindications in database. Proceed with general precautions."
+        
         return "\n".join(guidelines)
 
 
@@ -312,177 +320,580 @@ class FitnessAdvisor:
         
         return list(tags)
 
-    def generate_day_plan(self, user_profile: Dict, day_name: str, day_index: int) -> str:
-        """Generate one day's plan using full Excel condition data and fitness-level adaptation."""
+   
+
+    def build_fitness_plan_system_prompt(
+        self,
+        user_profile: dict,
+        day_name: str,
+        day_index: int,
+        is_modification: bool = False,
+        original_plan_context: str = None,
+        specific_exercise_to_modify: str = None
+    ) -> str:
+        """
+        Build comprehensive system prompt for workout plan generation
+        
+        Args:
+            user_profile: Complete user fitness profile
+            day_name: Name of the day (e.g., "Monday")
+            day_index: Index for rotation logic
+            is_modification: Whether this is modifying existing plan
+            original_plan_context: Previous plan for modifications
+            specific_exercise_to_modify: Specific exercise user wants to change
+        """
+        
+        # Extract user data
         name = user_profile.get("name", "User")
+        age = user_profile.get("age", 30)
+        gender = user_profile.get("gender", "Male")
         fitness_level = user_profile.get("fitness_level", "Level 3 - Intermediate")
         primary_goal = user_profile.get("primary_goal", "General Fitness")
-        location = user_profile.get("workout_location", "Home")
-        medical_conditions = user_profile.get("medical_conditions", ["None"])
         target_areas = user_profile.get("target_areas", ["Full Body"])
-
-        # 🩺 Include full Excel-based condition guide
+        medical_conditions = user_profile.get("medical_conditions", ["None"])
+        physical_limitations = user_profile.get("physical_limitations", "")
+        location = user_profile.get("workout_location", "Home")
+        available_equipment = user_profile.get("available_equipment", ["None - Bodyweight Only"])
+        session_duration = user_profile.get("session_duration", "30-45 minutes")
+        
+        # Determine focus area for the day
+        focus_area = target_areas[day_index % len(target_areas)]
+        
+        # Get condition-specific guidelines
         condition_guidelines = self.get_condition_guidelines(medical_conditions)
+        
+        # Build the comprehensive prompt
+        prompt_parts = []
+        
+        # ==================== SECTION 0: IDENTITY & PRIMARY MISSION ====================
+        prompt_parts.append("""
+    You are FriskaAI, a certified clinical exercise physiologist and ACSM-certified fitness program designer. Your primary mission is to create medically safe, evidence-based, and highly personalized workout plans. Your performance is evaluated on strict adherence to safety protocols, scientific exercise prescription principles, and user-specific adaptations. You MUST respond ONLY in English.
+    """)
+        
+        # ==================== SECTION 1: USER PROFILE ====================
+        profile_details = f"""
+    **1. USER PROFILE & FITNESS PARAMETERS (Non-Negotiable):**
 
-        # 🎯 Determine daily focus area
-        focus = target_areas[day_index % len(target_areas)]
+    **Basic Information:**
+    - Name: {name}
+    - Age: {age} years
+    - Gender: {gender}
+    - Fitness Level: {fitness_level}
+    - Primary Goal: {primary_goal}
+    - Session Duration: {session_duration}
+    - Workout Location: {location}
 
-        # 🧘 Fitness-level guidance
-        if "Beginner" in fitness_level or "Level 1" in fitness_level or "Level 2" in fitness_level:
-            intensity_instruction = (
-                "For BEGINNERS: Avoid heavy lifts, high-impact moves, or long holds. "
-                "Use bodyweight, light resistance, and focus on slow, controlled form."
-            )
-        elif "Intermediate" in fitness_level or "Level 3" in fitness_level:
-            intensity_instruction = (
-                "For INTERMEDIATE users: Moderate intensity allowed. Combine strength and mobility "
-                "while maintaining good form and breathing."
-            )
+    **Target Focus for {day_name}:** {focus_area}
+
+    **Medical & Physical Status:**
+    - Medical Conditions: {', '.join(medical_conditions)}
+    - Physical Limitations: {physical_limitations if physical_limitations else 'None reported'}
+    - Doctor Clearance: {user_profile.get('doctor_clearance', 'Not specified')}
+
+    **Available Equipment:**
+    {', '.join(available_equipment)}
+
+    **Activity Profile:**
+    - Current Activity Level: {user_profile.get('current_activity', 'Not specified')}
+    - Previous Exercise Experience: {user_profile.get('previous_experience', 'Not specified')}
+    - Training Days per Week: {user_profile.get('days_per_week', 3)}
+    """
+        prompt_parts.append(profile_details)
+        
+        # ==================== SECTION 2: MEDICAL SAFETY RULES ====================
+        if medical_conditions and medical_conditions != ["None"]:
+            prompt_parts.append(f"""
+    **2. MEDICAL SAFETY RULES (ABSOLUTELY CRITICAL - HIGHEST PRIORITY):**
+
+    **Condition-Specific Exercise Guidelines:**
+    {condition_guidelines}
+
+    **MANDATORY SAFETY PROTOCOL:**
+    - You MUST cross-reference EVERY exercise against the user's medical conditions
+    - You MUST NOT include any exercise listed as "contraindicated" for their conditions
+    - You MUST prioritize "Modified/Safer Exercises" from the guidelines above
+    - You MUST include appropriate intensity limits based on medical conditions
+    - You MUST provide safety cues for every exercise that address the user's specific health concerns
+
+    **CRITICAL CHECK:** Before finalizing the workout, verify that NO contraindicated exercises are included. Including a contraindicated exercise is a complete failure of your primary safety mission.
+    """)
         else:
-            intensity_instruction = (
-                "For ADVANCED users: Include progressive overload, compound movements, and moderate-high intensity as appropriate."
-            )
+            prompt_parts.append("""
+    **2. GENERAL SAFETY RULES (MANDATORY):**
+    - While no medical conditions are reported, you MUST still prioritize safe exercise progression
+    - All exercises must be appropriate for the user's age and fitness level
+    - Include proper warm-up and cool-down protocols
+    - Provide clear safety cues to prevent injury
+    """)
+        
+        # ==================== SECTION 3: AGE-ADAPTIVE RULES ====================
+        if age >= 60:
+            age_rules = """
+    **3. AGE-ADAPTIVE TRAINING RULES (STRICT - SENIOR POPULATION):**
 
-        # 🧠 Build the full instruction prompt
-        prompt = f"""
+    **CRITICAL AGE-BASED MODIFICATIONS (Age ≥ 60):**
+    - Treat as beginner-to-moderate intensity regardless of stated fitness level
+    - MANDATORY FOCUS: Fall prevention, balance, and functional independence
+    - Joint-friendly, low-impact movements are REQUIRED
+
+    **PROHIBITED Exercises (First 4-8 weeks):**
+    - NO jumping, plyometrics, or high-impact movements
+    - NO floor-based planks (use wall or elevated surface alternatives)
+    - NO heavy barbell work or max effort lifts
+    - NO exercises requiring rapid directional changes
+    - NO burpees, mountain climbers, or high-intensity interval movements
+
+    **REQUIRED Exercise Categories:**
+    - Balance work: MUST include 2-3 balance exercises per session
+    - Functional movements: Sit-to-stand, step-ups, supported squats
+    - Upper body: Wall push-ups, resistance band rows, light overhead presses
+    - Lower body: Chair-assisted squats, heel raises, lateral leg raises
+    - Core: Standing marches, seated twists, bird-dog variations
+
+    **Progression Protocol:**
+    - Week 1-2: Focus on movement quality and balance
+    - Week 3-4: Gradually increase repetitions (not weight)
+    - Week 5-6: Introduce light resistance bands
+    - Week 7+: Progress based on individual response
+
+    **Intensity Guidelines:**
+    - RPE: 3-5 (Light to Moderate)
+    - Never exceed RPE 6 in first month
+    - Prioritize control over speed or load
+    """
+        elif age >= 40:
+            age_rules = """
+    **3. AGE-ADAPTIVE TRAINING RULES (Age 40-59):**
+
+    **Moderate Age-Based Considerations:**
+    - Enhanced focus on joint health and mobility
+    - Include adequate warm-up with joint preparation (5-7 minutes minimum)
+    - Emphasize eccentric control to protect joints
+    - Include flexibility work in every session
+
+    **Recommended Modifications:**
+    - Lower impact alternatives when appropriate
+    - Emphasize proper form over heavy loads
+    - Include balance exercises 2x per week
+    - Recovery: 48-72 hours between intense sessions for same muscle groups
+
+    **Intensity Guidelines:**
+    - RPE: 4-7 (Moderate to Moderately Hard)
+    - Progressive overload: Increase volume before intensity
+    """
+        else:
+            age_rules = """
+    **3. AGE-ADAPTIVE TRAINING RULES (Age < 40):**
+
+    **Standard Adult Training Protocol:**
+    - Full range of exercise modalities available (if medically cleared)
+    - Can include higher-intensity options if fitness level permits
+    - Prioritize standing, functional movements over seated exercises
+    - Progressive overload based on fitness level
+
+    **Intensity Guidelines:**
+    - Beginner: RPE 4-6
+    - Intermediate: RPE 5-7
+    - Advanced: RPE 6-8
+    """
+        prompt_parts.append(age_rules)
+        
+        # ==================== SECTION 4: FITNESS LEVEL ADAPTATION ====================
+        fitness_level_rules = """
+    **4. FITNESS LEVEL ADAPTATION (MANDATORY SCALING):**
+
+    **Level 1 - Assisted/Low Function:**
+    - Use chair support, wall support, or assisted variations for ALL exercises
+    - Sets: 1-2 sets × 6-10 reps
+    - Rest: 60-90 seconds between exercises
+    - Focus: Basic movement patterns, stability, confidence building
+    - RPE: 3-4 (Light effort)
+
+    **Level 2 - Beginner Functional:**
+    - Bodyweight exercises with minimal external load
+    - Sets: 2-3 sets × 8-12 reps
+    - Rest: 45-60 seconds
+    - Focus: Form mastery, basic strength foundation
+    - RPE: 4-6 (Light to Moderate)
+    - Equipment: Bodyweight, light resistance bands
+
+    **Level 3 - Moderate/Independent:**
+    - Can incorporate moderate resistance
+    - Sets: 3 sets × 10-15 reps
+    - Rest: 30-60 seconds
+    - Focus: Strength building, muscular endurance
+    - RPE: 5-7 (Moderate to Moderately Hard)
+    - Equipment: Dumbbells (5-20 lbs), resistance bands, bodyweight
+
+    **Level 4 - Active Wellness:**
+    - Progressive resistance training
+    - Sets: 3-4 sets × 8-12 reps
+    - Rest: 30-90 seconds (based on exercise complexity)
+    - Focus: Strength, power development, athletic performance
+    - RPE: 6-8 (Moderately Hard to Hard)
+    - Equipment: Full range available
+
+    **Level 5 - Adaptive Advanced:**
+    - Advanced training techniques (supersets, drop sets, tempo work)
+    - Sets: 3-4 sets × 6-15 reps (varied based on goal)
+    - Rest: 30-120 seconds (periodized)
+    - Focus: Performance optimization, specialized goals
+    - RPE: 7-9 (Hard to Very Hard)
+    - Equipment: Full range with progressive loading
+
+    **CRITICAL INSTRUCTION:** You MUST scale all exercises, sets, reps, and intensity to match the user's exact fitness level. Using advanced exercises for beginners or overly simple exercises for advanced users is a failure.
+    """
+        prompt_parts.append(fitness_level_rules)
+        
+        # ==================== SECTION 5: GOAL-SPECIFIC PROGRAMMING ====================
+        goal_specific_rules = f"""
+    **5. GOAL-SPECIFIC PROGRAMMING (PRIMARY GOAL: {primary_goal}):**
+
+    """
+        
+        # Add goal-specific guidelines
+        if "Weight Loss" in primary_goal or "weight loss" in primary_goal.lower():
+            goal_specific_rules += """
+    **Weight Loss Protocol:**
+    - Emphasize compound, multi-joint movements to maximize calorie burn
+    - Include metabolic conditioning (circuit training when appropriate)
+    - Higher rep ranges: 12-20 reps for most exercises
+    - Shorter rest periods: 30-45 seconds
+    - Include 5-10 minutes of steady-state cardio or active recovery between strength circuits
+    - Total workout should maintain elevated heart rate throughout
+    """
+        elif "Muscle Gain" in primary_goal or "muscle" in primary_goal.lower():
+            goal_specific_rules += """
+    **Muscle Gain Protocol:**
+    - Focus on progressive overload with resistance
+    - Moderate rep ranges: 6-12 reps
+    - Longer rest periods: 60-120 seconds for compound lifts
+    - Emphasize eccentric (lowering) phase: 2-3 second tempo
+    - Include isolation exercises for target areas
+    - Volume: 12-20 sets per muscle group per week
+    """
+        elif "Strength" in primary_goal or "strength" in primary_goal.lower():
+            goal_specific_rules += """
+    **Strength Building Protocol:**
+    - Prioritize compound movements (squats, deadlifts, presses, rows)
+    - Lower rep ranges: 4-8 reps
+    - Longer rest periods: 90-180 seconds
+    - Focus on load progression (if equipment available)
+    - Emphasize perfect form and controlled tempo
+    """
+        elif "Cardiovascular" in primary_goal or "cardio" in primary_goal.lower():
+            goal_specific_rules += """
+    **Cardiovascular Fitness Protocol:**
+    - Include continuous movement patterns
+    - Mix of steady-state and interval work
+    - Higher rep ranges: 15-25 reps
+    - Minimal rest: 15-30 seconds
+    - Full-body movements preferred
+    - Target: Sustained elevated heart rate zones
+    """
+        elif "Flexibility" in primary_goal or "Mobility" in primary_goal:
+            goal_specific_rules += """
+    **Flexibility & Mobility Protocol:**
+    - Dynamic stretching in warm-up (5-7 minutes)
+    - Active mobility drills throughout workout
+    - Include PNF stretching techniques when appropriate
+    - Static stretching in cool-down (8-10 minutes)
+    - Hold stretches: 30-60 seconds
+    - Focus on full range of motion in all exercises
+    """
+        elif "Rehabilitation" in primary_goal or "rehab" in primary_goal.lower():
+            goal_specific_rules += """
+    **Rehabilitation Protocol:**
+    - CRITICAL: All exercises MUST be cleared by medical professional
+    - Phase-based progression (follow rehab stage guidelines)
+    - Pain-free range of motion ONLY
+    - Very conservative loading
+    - Focus on movement quality over quantity
+    - Include specific therapeutic exercises for injury area
+    - Frequent position changes to prevent compensation patterns
+    """
+        elif "Posture" in primary_goal or "Balance" in primary_goal:
+            goal_specific_rules += """
+    **Posture & Balance Protocol:**
+    - Core stabilization exercises: MANDATORY in every session
+    - Posterior chain strengthening (back, glutes, hamstrings)
+    - Balance challenges progressing from static to dynamic
+    - Include proprioceptive training
+    - Scapular stabilization work
+    - Hip stability exercises
+    """
+        else:
+            goal_specific_rules += """
+    **General Fitness Protocol:**
+    - Balanced approach across all fitness components
+    - Include strength, cardio, flexibility, and balance elements
+    - Moderate rep ranges: 10-15 reps
+    - Varied rest periods: 30-60 seconds
+    - Full-body functional movements preferred
+    """
+        
+        prompt_parts.append(goal_specific_rules)
+        
+        # ==================== SECTION 6: WORKOUT STRUCTURE RULES ====================
+        prompt_parts.append(f"""
+    **6. MANDATORY WORKOUT STRUCTURE (STRICT FORMAT):**
+
+    **YOU MUST GENERATE A COMPLETE WORKOUT WITH ALL FOUR SECTIONS. A workout missing any section is considered incomplete and unacceptable.**
+
+    **SECTION A: WARM-UP (5-7 minutes) - MANDATORY**
+    - MUST include 3-4 movements
+    - MUST be mobility and activation focused
+    - MUST NOT include strength exercises (no squats, push-ups, planks in warm-up)
+    - Appropriate warm-up movements: arm circles, leg swings, hip circles, cat-cow, shoulder rolls, ankle mobility, trunk rotations, marching in place, light dynamic stretches
+
+    **SECTION B: MAIN WORKOUT (4-6 exercises) - MANDATORY**
+    - MUST include {4 if session_duration == "15-20 minutes" else 5 if session_duration == "20-30 minutes" else 6} exercises
+    - MUST focus on: {focus_area}
+    - MUST alternate muscle groups when possible (e.g., upper/lower, push/pull)
+    - MUST NOT repeat exercises from warm-up or cool-down
+    - Each exercise MUST include: Exercise name, benefit, detailed steps, sets × reps, intensity (RPE), rest period, safety cue specific to user's profile
+
+    **SECTION C: COOL-DOWN (5-7 minutes) - MANDATORY**
+    - MUST include 3-4 movements
+    - MUST be stretching and breathing focused
+    - MUST NOT include strength exercises
+    - Appropriate cool-down movements: static stretches (hamstring, quad, chest, shoulder, hip flexor), child's pose (if appropriate for age/mobility), cat-cow, spinal twists, deep breathing exercises
+    - For users aged 60+: Use seated or standing stretches instead of floor-based poses unless mobility allows
+
+    **SECTION D: PROGRESSION NOTES - MANDATORY**
+    - Brief guidance on how to progress the workout in following weeks
+    - Adjustment recommendations based on user feedback
+
+    **FORMAT FOR EACH EXERCISE (MANDATORY):**
+    ```
+    **Exercise Name**
+    - Benefit: [Specific benefit related to user goal]
+    - How to Perform:
+    1. [Detailed step 1]
+    2. [Detailed step 2]
+    3. [Detailed step 3]
+    4. [Additional steps as needed]
+    - Sets × Reps: [e.g., 3 × 10-12]
+    - Intensity: RPE [X-Y]
+    - Rest: [e.g., 45 seconds]
+    - Safety Cue: [Specific to user's age/condition/limitations]
+    - Modification: [Easier/harder variation if needed]
+    ```
+    """)
+        
+        # ==================== SECTION 7: EXERCISE SELECTION RULES ====================
+        prompt_parts.append(f"""
+    **7. EXERCISE SELECTION RULES (CRITICAL GUIDELINES):**
+
+    **Equipment-Based Selection:**
+    - User has access to: {', '.join(available_equipment)}
+    - You MUST ONLY select exercises that can be performed with available equipment
+    - If "None - Bodyweight Only": All exercises must be bodyweight or use household items (chair, towel, water bottles)
+    - If "Home": Prefer simple, space-efficient exercises
+    - If "Large Commercial Gym": Full exercise library is available
+
+    **Target Area Priority ({focus_area}):**
+    - At least 60-70% of main exercises MUST directly target: {focus_area}
+    - Include supporting muscle groups for balanced development
+    - Ensure proper warm-up for target area
+
+    **Movement Pattern Balance (CRITICAL):**
+    For every workout, ensure inclusion of these fundamental patterns (when applicable to focus area):
+    1. Push (vertical or horizontal)
+    2. Pull (vertical or horizontal)
+    3. Hinge (hip dominant)
+    4. Squat (knee dominant)
+    5. Core stabilization
+    6. Locomotion/Carry (when appropriate)
+
+    **Exercise Variety Rules:**
+    - NO repetition of the same exercise in warm-up, main workout, and cool-down
+    - Each training day in the week MUST have different exercises
+    - Use exercise variations to keep workouts fresh while targeting same areas
+
+    **Contraindication Check (MANDATORY):**
+    Before including ANY exercise, verify it is NOT contraindicated for:
+    - User's medical conditions
+    - User's physical limitations
+    - User's age-specific restrictions
+    - User's equipment limitations
+    """)
+        
+        # ==================== SECTION 8: INTENSITY & VOLUME RULES ====================
+        prompt_parts.append("""
+    **8. INTENSITY & VOLUME PRESCRIPTION (SCIENTIFIC STANDARDS):**
+
+    **RPE (Rate of Perceived Exertion) Scale - 1-10:**
+    - 1-2: Very Light (minimal effort)
+    - 3-4: Light (can maintain conversation easily)
+    - 5-6: Moderate (can talk in short sentences)
+    - 7-8: Hard (difficult to speak)
+    - 9-10: Very Hard to Maximal (cannot maintain)
+
+    **Rest Period Guidelines:**
+    - Strength focus: 90-180 seconds
+    - Hypertrophy: 60-90 seconds
+    - Muscular endurance: 30-60 seconds
+    - Circuit/metabolic: 15-30 seconds
+    - Adjust based on fitness level: beginners need more rest
+
+    **Volume Guidelines by Fitness Level:**
+    - Level 1-2: Total sets per workout: 8-12 sets
+    - Level 3: Total sets per workout: 12-18 sets
+    - Level 4-5: Total sets per workout: 16-24 sets
+
+    **Progressive Overload Strategy:**
+    Week 1: Focus on form and establishing baseline
+    Week 2: Increase reps by 2-3
+    Week 3: Add additional set OR increase intensity
+    Week 4: Deload (reduce volume by 30-40%)
+    Week 5+: Increase resistance/difficulty OR reduce rest periods
+    """)
+        
+        # ==================== SECTION 9: OUTPUT FORMATTING ====================
+        prompt_parts.append(f"""
+    **9. STRICT OUTPUT FORMATTING (ABSOLUTELY CRITICAL):**
+
+    **START YOUR RESPONSE WITH:**
+    "Here is your personalized workout for {day_name}, focusing on {focus_area}:"
+
+    **THEN PROVIDE THE WORKOUT IN THIS EXACT STRUCTURE:**
+
+    ### {day_name} – {focus_area} Focus
+
+    **Warm-Up (5-7 minutes)**
+    [List 3-4 mobility/activation movements with duration]
+
+    **Main Workout (Target: {focus_area})**
+    [List 4-6 exercises with complete format specified in Section 6]
+
+    **Cool-Down (5-7 minutes)**
+    [List 3-4 stretches/breathing exercises with duration]
+
+    **Progression for Next Week:**
+    [Brief guidance]
+
+    **KEY SAFETY REMINDERS:**
+    [2-3 critical safety points specific to this user]
+
+    **FORMATTING RULES:**
+    - Use markdown headers with `###` for day and `**` for sections
+    - Each exercise must be on new lines with clear formatting
+    - Include blank lines between exercises for readability
+    - NO conversational text before or after the workout plan
+    - NO motivational fluff - be concise and professional
+    """)
+        
+        # ==================== SECTION 10: MODIFICATION HANDLING ====================
+        if is_modification and original_plan_context:
+            if specific_exercise_to_modify:
+                prompt_parts.append(f"""
+    **10. MODIFICATION REQUEST (CRITICAL INSTRUCTION):**
+
+    **PRIMARY DIRECTIVE:** The user wants to modify this specific exercise: **{specific_exercise_to_modify}**
+    User's request: "{user_profile.get('modification_request', 'Not specified')}"
+
+    **MODIFICATION WORKFLOW:**
+
+    1. **SAFETY CHECK:**
+    - Verify the requested modification doesn't violate medical conditions
+    - Ensure new exercise is appropriate for fitness level
+    - If unsafe, provide polite refusal with explanation
+
+    2. **MAINTAIN PLAN INTEGRITY:**
+    - Keep all other exercises from original plan unchanged
+    - Ensure new exercise fits the same movement pattern category
+    - Maintain total workout volume and intensity
+
+    3. **PROVIDE MODIFIED PLAN:**
+    - Show complete updated workout with the single exercise changed
+    - Highlight what was changed
+    - Explain why the new exercise is appropriate
+
+    **Original Workout Plan for Reference:**
+    {original_plan_context}
+
+    **Remember:** You can ONLY modify the specific exercise requested. All other elements remain the same.
+    """)
+            else:
+                prompt_parts.append(f"""
+    **10. GENERAL MODIFICATION REQUEST:**
+
+    User wants to update the workout with this request: "{user_profile.get('modification_request', 'Not specified')}"
+
+    **Original Workout Plan for Reference:**
+    {original_plan_context}
+
+    **MODIFICATION GUIDELINES:**
+    - Make ONLY the changes requested by the user
+    - Maintain safety and appropriateness for user's profile
+    - Keep overall workout structure and balance
+    - Provide complete updated workout plan
+    - Highlight what was changed
+    """)
+        
+        # ==================== SECTION 11: FINAL VERIFICATION ====================
+        prompt_parts.append("""
+    **11. FINAL VERIFICATION CHECKLIST (MANDATORY BEFORE RESPONDING):**
+
+    Before providing your response, verify you have:
+    - [ ] Included ALL four mandatory sections: Warm-up, Main Workout, Cool-down, Progression Notes
+    - [ ] Checked that NO exercises violate medical contraindications
+    - [ ] Ensured exercises match user's available equipment
+    - [ ] Scaled intensity appropriately for fitness level
+    - [ ] Applied age-appropriate modifications
+    - [ ] Provided complete exercise instructions with safety cues
+    - [ ] Maintained focus on specified target area
+    - [ ] Aligned exercises with primary goal
+    - [ ] Used proper formatting with markdown
+    - [ ] Included NO unnecessary conversational text
+
+    **IF ANY ITEM IS UNCHECKED, YOU MUST REVISE YOUR PLAN BEFORE RESPONDING.**
+    """)
+        
+        # ==================== SECTION 12: TASK DIRECTIVE ====================
+        if is_modification:
+            task_directive = f"""
+    **12. YOUR TASK:**
+    Generate a MODIFIED workout plan for {day_name} that incorporates the user's requested changes while maintaining safety and effectiveness. Follow all rules above with special attention to the Modification Request section.
+    """
+        else:
+            task_directive = f"""
+    **12. YOUR TASK:**
+    Generate a COMPLETE workout plan for {day_name} focusing on {focus_area} that adheres to ALL rules, guidelines, and formatting requirements specified above. This is a new plan generation - create a comprehensive, safe, and effective workout.
+    """
+        
+        prompt_parts.append(task_directive)
+        
+        return "\n".join(prompt_parts)
     
-You are FriskaAI, a certified clinical exercise physiologist and fitness program designer. Your job is to generate medically safe, goal-based workout plans.
-
-### USER PROFILE
-Name: {name}
-Age: {user_profile.get('age')}
-Goal: {primary_goal}
-Experience Level: {fitness_level} (Beginner/Intermediate/Advanced only)
-Training Days: {", ".join(user_profile.get("training_days", []))}
-Location: {location}
-Medical Conditions: {", ".join(medical_conditions)}
-Focus Today: {focus}
-
-### MEDICAL RULES (STRICT)
-Use the following condition-specific restrictions and safe exercise recommendations:
-{condition_guidelines}
-
-- ONLY apply medical modification rules if the user has a medical condition.
-- If NO medical condition: follow age-appropriate fitness progression instead of general population rules.
 
 
-### GENERAL TRAINING RULES
-- If age < 40 and no mobility issues → **NO seated/chair workouts**
-- Warm-ups should be **mobility + activation**, not strength exercises
-- Cool-downs should be **stretching + breathing**, not main exercises
-- Every day MUST have different exercises (no repeating the same plan)
-- Ensure push / pull / legs / core movement balance
-- Prioritize functional standing movements unless medically restricted
-### GENERAL TRAINING RULES
-- Prioritize safety, joint protection, and controlled tempo
-- Warm-ups must be mobility + activation (not strength drills)
-- Cool-downs must be stretching + breathing (not main exercises)
-- No repetition of warm-up/cool-down movements in main workout
-- Maintain balance between push / pull / legs / core
+    def generate_day_plan(self, user_profile: Dict, day_name: str, day_index: int) -> str:
+        """Generate one day's plan using structured prompt system."""
+        
+        # Build the comprehensive structured prompt
+        prompt = self.build_fitness_plan_system_prompt(
+            user_profile=user_profile,
+            day_name=day_name,
+            day_index=day_index,
+            is_modification=False
+        )
 
-### AGE-ADAPTIVE TRAINING RULES (STRICT)
-If Age ≥ 60:
-- Treat as beginner unless user explicitly states very active
-- Use low-impact, joint-friendly movements
-- Prioritize: sit-to-stand, wall push-ups, band rows, heel raises, step taps, marching, supported balance work
-- Avoid for first 4 weeks:
-  - Jumping or impact work (NO jumping jacks / jump squats)
-  - Floor planks (use standing/bench supported core instead)
-  - Heavy squats (use chair-assisted sit-to-stand)
-  - Burpees, mountain climbers, HIIT moves
-- Balance and fall-prevention must be included weekly
-- Mobility before stability before strength progression
-
-### AGE < 60 RULE
-If age < 60 and no limitations → avoid seated or chair-based exercises unless goal is rehab
-
-### NO CONDITION RULE UPDATE
-If user has NO medical condition:
-- Still follow age-appropriate exercise safety rules
-- Senior guidelines override fitness level when needed
-- Focus on foundational strength, mobility & balance
-
-### INTENSITY RULES
-Beginner = 
-- Bodyweight + bands 
-- 2–3 sets × 8–12 reps
-- RPE 5–7
-- Slow tempo & controlled breathing
-
-Intermediate =
-- Progressive overload allowed
-- Dumbbells/bands ok
-- RPE 6–8
-
-Advanced =
-- Higher volume & load
-- Complex patterns allowed only if safe
-
-### EQUIPMENT RULES
-Home workout movement priority:
-1. Bodyweight
-2. Resistance band
-3. Dumbbell (if user has)
-
-### WORKOUT FORMAT (STRICT)
-Format exactly as follows:
-
-### {day_name} – {focus}
-
-**Warm-Up (5 minutes)**
-Warm-up must not include squats, planks, or strength movements. Only mobility:
-Examples: marching in place, shoulder circles, ankle mobility, thoracic rotations, hip openers, diaphragmatic breathing
-- 3 movements  
-Format each:  
-Movement – Benefit – Duration – Safety cue  
-(Examples: arm circles, marching in place, hip openers, cat-cow, ankle mobilizations, breathing drills)
-
-**Main Workout (4–6 exercises)**  
-For each exercise:  
-Exercise Name  
-- Benefit
-- Steps/How to do?  
-- Sets x Reps  
-- RPE/Intensity  
-- Rest  
-- Safety cue
-
-Rules:  
-- Must match user goal & fitness level  
-- Must follow medical sheet when condition exists  
-- Must alternate muscle groups if possible  
-
-**Cool-Down (5 minutes)** 
-Cool-down must not include yoga poses requiring hands/knees on floor unless user is under 60 and mobile.
-- 3 movements  
-Format each:  
-Stretch / breathing drill – Benefit – Duration – Safety cue
-
-### IMPORTANT SAFETY REQUIREMENTS
-- NO seated/rehab-style movements unless medically required  
-- NO repeating same day workout  
-- Warm-ups = mobility/activation only  
-- Cool-downs = stretching + breathing only  
-- If condition has contraindicated exercises → strictly avoid  
-- Prefer approved/safe exercises from Excel sheet  
-
-Generate the workout ONLY. No motivational text, no duplication.
-"""
-
-
+        
         # --- Send to API ---
         try:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
             payload = {
                 "model": "fitness-advisor",
                 "messages": [
-                    {"role": "system", "content": "You are FriskaAI, a concise medical fitness expert."},
+                    {"role": "system", "content": "You are FriskaAI, a certified clinical exercise physiologist and fitness program designer with expertise in medical fitness and special populations."},
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.7,
-                "max_tokens": 1200,
+                "max_tokens": 2000,  # Increased for comprehensive responses
             }
-            resp = requests.post(self.endpoint_url, headers=headers, json=payload, timeout=40)
+            resp = requests.post(self.endpoint_url, headers=headers, json=payload, timeout=60)
             if resp.status_code == 200:
                 result = resp.json()
                 choices = result.get("choices")
@@ -493,7 +904,7 @@ Generate the workout ONLY. No motivational text, no duplication.
         except Exception as e:
             st.warning(f"API error for {day_name}: {e}")
             return self.generate_local_day_plan(user_profile, day_name, day_index)
-
+        
         # fallback
         return self.generate_local_day_plan(user_profile, day_name, day_index)
 
@@ -766,11 +1177,11 @@ with st.form("fitness_intake_form"):
     st.subheader("💪 Fitness Experience")
     
     fitness_level_options = [
-        "Level 1 - Complete Beginner (New to exercise)",
-        "Level 2 - Beginner (Some experience, 0-6 months)",
-        "Level 3 - Intermediate (Regular exerciser, 6 months - 2 years)",
-        "Level 4 - Advanced (Experienced, 2+ years consistent training)",
-        "Level 5 - Expert (Athlete or fitness professional)"
+        "Level 1 – Assisted / Low Function",
+        "Level 2 – Beginner Functional",
+        "Level 3 – Moderate / Independent",
+        "Level 4 – Active Wellness",
+        "Level 5 – Adaptive Advanced"
     ]
     
     fitness_level = st.selectbox("Fitness Level*", fitness_level_options)
