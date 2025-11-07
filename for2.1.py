@@ -1224,8 +1224,8 @@ Use a combination of:
 - Build confidence in movement capability
 """
     
-    elif "Level 2" in fitness_level or "Beginner Functional" in fitness_level:
-        return """
+        elif "Level 2" in fitness_level or "Beginner Functional" in fitness_level:
+            return """
 **5. FITNESS LEVEL ADAPTATIONS (LEVEL 2 - BEGINNER FUNCTIONAL):**
 
 **PROFILE:** Can perform light bodyweight tasks, mild conditions under control
@@ -1274,8 +1274,8 @@ Use a combination of:
 - Some muscle soreness normal, sharp pain = stop
 """
     
-    elif "Level 3" in fitness_level or "Moderate" in fitness_level or "Independent" in fitness_level:
-        return """
+        elif "Level 3" in fitness_level or "Moderate" in fitness_level or "Independent" in fitness_level:
+            return """
 **5. FITNESS LEVEL ADAPTATIONS (LEVEL 3 - MODERATE / INDEPENDENT):**
 
 **PROFILE:** Can perform unassisted movements with mild fatigue
@@ -1325,8 +1325,8 @@ Use a combination of:
 - Include dedicated mobility work
 """
     
-    elif "Level 4" in fitness_level or "Active Wellness" in fitness_level:
-        return """
+        elif "Level 4" in fitness_level or "Active Wellness" in fitness_level:
+            return """
 **5. FITNESS LEVEL ADAPTATIONS (LEVEL 4 - ACTIVE WELLNESS):**
 
 **PROFILE:** No severe limitations, accustomed to regular activity
@@ -1369,8 +1369,8 @@ Use a combination of:
 - Stability challenges included
 """
     
-    elif "Level 5" in fitness_level or "Adaptive Advanced" in fitness_level:
-        return """
+        elif "Level 5" in fitness_level or "Adaptive Advanced" in fitness_level:
+            return """
 **5. FITNESS LEVEL ADAPTATIONS (LEVEL 5 - ADAPTIVE ADVANCED):**
 
 **PROFILE:** Experienced user managing mild conditions
@@ -1421,8 +1421,8 @@ Use a combination of:
 - Maintain exercise variety to prevent overuse
 """
     
-    else:
-        return """
+        else:
+            return """
 **5. FITNESS LEVEL ADAPTATIONS (GENERAL):**
 - Exercise selection: Match complexity to demonstrated capability
 - Progressive overload: Gradual increases in difficulty over time
