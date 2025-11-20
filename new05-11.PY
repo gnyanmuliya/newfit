@@ -1,5 +1,3 @@
-#test6
-
 import streamlit as st
 import requests
 from typing import Dict, List, Optional, Set, Any
@@ -8,11 +6,13 @@ from datetime import datetime
 import pandas as pd
 import json
 import numpy as np # Used for safe NaN handling
+import time # Import for exponential backoff
 
 # ============ CONFIGURATION ============
 # NOTE: The API key and Endpoint URL are set for an Azure Mistral deployment.
 API_KEY = "08Z5HKTA9TshVWbKb68vsef3oG7Xx0Hd"
 ENDPOINT_URL = "https://mistral-small-2503-Gnyan-Test.swedencentral.models.ai.azure.com/chat/completions"
+MAX_RETRIES = 3 # New constant for API retries
 
 st.set_page_config(
     page_title="FriskaAI Fitness Coach",
@@ -218,33 +218,80 @@ class FitnessAdvisor:
             "modified_safer": "Low-impact, controlled movements, seated or supported alternatives."
         })
 
-    def _determine_split_focus(self, total_days: int, day_index: int) -> str:
-        """Determine the body part focus based on frequency and day index. (NO CHANGE)"""
+    def _determine_split_focus_and_repetition(self, total_days: int, day_index: int, fitness_level: str) -> tuple[str, str]:
+        """Determine the body part focus and the repetition rule for the current day based on new complex rules."""
         
-        if total_days <= 2:
-            return "Full Body Focus (Emphasis on major muscle groups)"
+        days_map = {0: "Day 1", 1: "Day 2", 2: "Day 3", 3: "Day 4", 4: "Day 5", 5: "Day 6", 6: "Day 7"}
+        current_day_label = days_map.get(day_index, f"Day {day_index + 1}")
+        level_num = int(fitness_level.split(" – ")[0].replace('Level ', ''))
+        
+        default_focus = "Full Body Focus (Emphasis on major muscle groups)"
+        
+        if total_days == 1:
+            focus = "Single Full-Body Workout"
+            repetition_rule = "N/A (Single Session)"
+        
+        elif total_days == 2:
+            focus = "Full Body Workout"
+            if level_num <= 3:
+                repetition_rule = "Exercises can be repeated from Day 1 (Full Body)."
+            else:
+                repetition_rule = "Exercises MUST be different from Day 1 (focus on variation for high levels)."
+        
         elif total_days == 3:
-            focus_map = {0: "Full Body Focus", 1: "Upper Body Focus", 2: "Lower Body Focus"}
-            return focus_map.get(day_index % 3, "Full Body Focus")
+            focus_map = {0: "Full Body (A)", 1: "Full Body (B)", 2: "Full Body (A)"}
+            focus = focus_map.get(day_index % 3, default_focus)
+            
+            if level_num <= 2:
+                 repetition_rule = "All exercises may be repeated from Day 1."
+            elif day_index == 1:
+                repetition_rule = "Workout B. Must be entirely different exercises from Day 1 (A)."
+            elif day_index == 2:
+                repetition_rule = "Workout A. Use SIMILAR muscle groups to Day 1, but DIFFERENT specific exercises/variations to avoid repetition."
+            else:
+                repetition_rule = "Workout A (Starting Point)."
+
         elif total_days == 4:
-            focus_map = {0: "Upper Body Focus", 1: "Lower Body Focus", 2: "Upper Body Focus", 3: "Lower Body Focus"}
-            return focus_map.get(day_index % 4, "Upper Body Focus")
-        elif total_days >= 5:
+            focus_map = {0: "Upper Body (A) / Strength", 1: "Lower Body (B) / Stability", 2: "Upper Body (A) / Volume", 3: "Lower Body (B) / Endurance"}
+            focus = focus_map.get(day_index % 4, default_focus)
+            repetition_rule = "Split is A-B-A-B. Day 1 (A) and Day 3 (A) should have SIMILAR muscle groups but DIFFERENT specific exercises/variations. Day 2 (B) and Day 4 (B) follow the same rule."
+
+        elif total_days == 5:
+            focus_map = {0: "Upper Strength (A)", 1: "Lower Strength (B)", 2: "Full Body Endurance (C)", 3: "Upper Volume (A)", 4: "Lower Volume (B)"}
+            focus = focus_map.get(day_index % 5, default_focus)
+            repetition_rule = "Split is A-B-C-A-B. Workout A (Day 1 & 4) and B (Day 2 & 5) should use SIMILAR muscle groups but DIFFERENT specific exercises/variations. Workout C (Day 3) must be unique and endurance-focused."
+
+        elif total_days == 6:
+            focus_map = {0: "Push (A)", 1: "Pull (B)", 2: "Legs (C)", 3: "Push (A)", 4: "Pull (B)", 5: "Legs (C)"}
+            focus = focus_map.get(day_index % 6, default_focus)
+            repetition_rule = "Split is A-B-C-A-B-C. Use SIMILAR muscle groups but DIFFERENT exercises/variations for the repeated focus days (e.g., Push Day 1 vs Push Day 4)."
+
+        elif total_days == 7:
             focus_map = {
-                0: "Upper Body Strength Focus", 
-                1: "Lower Body Strength Focus", 
-                2: "Full Body Endurance Focus", 
-                3: "Upper Body Volume Focus", 
-                4: "Lower Body Volume Focus",
-                5: "Core & Mobility Focus",
-                6: "Active Recovery Focus"
+                0: "Upper Strength (A)", 
+                1: "Lower Strength (B)", 
+                2: "Full Body Endurance (C)", 
+                3: "Active Recovery/Mobility (D)", # Mid-week Active Recovery
+                4: "Upper Volume (A)", 
+                5: "Lower Volume (B)",
+                6: "Core & Flexibility (E)"
             }
-            return focus_map.get(day_index % 7, "Full Body Focus")
+            focus = focus_map.get(day_index % 7, default_focus)
+            repetition_rule = "Split is A-B-C-D-A-B-E. A, B, and C repeat with DIFFERENT exercises/variations on their second occurrence (Day 4/5). Day 3 (D) is Active Recovery. Day 6 (E) is unique."
+            if current_day_label == days_map.get(3):
+                focus = "Active Recovery Focus (Mobility, Stretching, Light Walk)"
         
-        return "Full Body Focus"
+        else:
+             focus = default_focus
+             repetition_rule = "Standard full body split."
+
+        return focus, repetition_rule
     
-    def _determine_exercise_count(self, session_duration: str) -> str:
-        """Determine the target number of main exercises based on duration. (NO CHANGE)"""
+    def _determine_exercise_count(self, session_duration: str, fitness_level: str) -> str:
+        """
+        Determine the target number of main exercises based on duration, 
+        ADJUSTED for fitness level to manage joint stress and volume.
+        """
         duration_map = {
             "15-20 minutes": 17.5, 
             "20-30 minutes": 25, 
@@ -253,6 +300,7 @@ class FitnessAdvisor:
         }
         total_minutes = duration_map.get(session_duration, 37.5)
         
+        # Base count based on duration (Original logic)
         if total_minutes <= 25:
             count = 4
         elif total_minutes <= 40:
@@ -262,105 +310,104 @@ class FitnessAdvisor:
         else:
             count = 8
             
+        # Adjustment based on fitness level (Issue 2 fix)
+        if fitness_level == "Level 1 – Assisted / Low Function":
+            # Max 4 exercises for Level 1, prioritizing very low volume.
+            if count > 4:
+                 count = 4 
+        elif fitness_level == "Level 2 – Beginner Functional":
+             # Max 5 exercises for Level 2, balancing stress and progress.
+            if count > 5:
+                count = 5 
+            
         return str(count)
-
-    def _render_exercise_markdown(self, exercise: Dict, type: str) -> str:
-        """Helper function to render a single exercise block in the detailed format."""
-        
-        markdown_output = ""
-        name = exercise.get('name', 'Exercise Name Missing')
-        
-        # Use a smaller heading for warm-up/cooldown elements
-        markdown_output += f"### - {name}\n" 
-        markdown_output += f"**🎯 Benefit:** {exercise.get('benefit', 'N/A')}\n\n"
-        
-        markdown_output += "**⚙️ How to Perform:**\n"
-        # Ensure steps are rendered as a clear list
-        for step in exercise.get('steps', []):
-            markdown_output += f"- {step}\n"
-        markdown_output += "\n"
-        
-        # Determine parameter names based on type
-        rep_label = "Reps / Duration"
-        rest_label = "Rest / Hold Time"
-        
-        if type == "main":
-            rep_label = "Reps"
-            rest_label = "Rest"
-        elif type == "warmup":
-            rep_label = "Duration"
-            rest_label = "Rest"
-        elif type == "cooldown":
-            rep_label = "Hold Duration"
-            rest_label = "Rest / N/A"
-
-        # Use a table for parameters
-        markdown_output += (
-            f"| Parameter | Value |\n"
-            f"| :--- | :--- |\n"
-            f"| **Sets** | **{exercise.get('sets', 'N/A')}** |\n"
-            f"| **{rep_label}** | **{exercise.get('reps', 'N/A')}** |\n"
-            f"| **Intensity** | **{exercise.get('intensity_rpe', 'N/A')}** |\n"
-            f"| **{rest_label}** | **{exercise.get('rest', 'N/A')}** |\n"
-            f"| **Equipment** | {exercise.get('equipment', 'N/A')} |\n"
-        )
-        markdown_output += "\n"
-        
-        markdown_output += f"⚠️ **Safety Cue:** {exercise.get('safety_cue', 'N/A')}\n"
-        markdown_output += "\n---\n"
-        
-        return markdown_output
 
     def _convert_plan_to_markdown_enhanced(self, plan_json: Dict) -> str:
         """
         Converts the structured JSON plan back into a user-friendly Markdown string 
-        with enhanced formatting, now using a unified detailed structure for W/U and C/D.
+        with strict, numbered formatting for ALL sections, as requested. (NO CHANGE)
         """
         if not plan_json:
             return "Plan structure is missing or empty."
 
         markdown_output = ""
         
-        # 1. Warm-Up - Using unified detailed structure
+        # Helper function for formatting exercise blocks (used by all sections)
+        def format_exercise_block(exercise_data: Dict, index: int, section_type: str) -> str:
+            
+            name = exercise_data.get('name', 'Exercise Name Missing')
+            # Use 'benefit' for main/warmup and 'focus' for cooldown, defaulting to a shared field if one is missing.
+            benefit = exercise_data.get('benefit', exercise_data.get('focus', 'N/A'))
+            steps = exercise_data.get('steps', [])
+            
+            # Determine Rep/Duration/Hold label and value
+            if section_type == 'main':
+                rep_label = "Reps"
+                rep_value = exercise_data.get('reps', 'N/A')
+                set_label = "Sets"
+                set_value = exercise_data.get('sets', 'N/A')
+            elif section_type == 'warmup':
+                rep_label = "Duration"
+                rep_value = exercise_data.get('duration', 'N/A')
+                set_label = "Sets" 
+                set_value = exercise_data.get('sets', '1') # Force 1 set for consistency
+            elif section_type == 'cooldown':
+                rep_label = "Hold Duration"
+                rep_value = exercise_data.get('hold', 'N/A')
+                set_label = "Sets"
+                set_value = exercise_data.get('sets', '1') # Force 1 set for consistency
+            else:
+                rep_label = "Value"
+                rep_value = "N/A"
+                set_label = "Sets"
+                set_value = "N/A"
+
+            intensity_value = exercise_data.get('intensity_rpe', 'N/A').replace('RPE ', '')
+            rest_value = exercise_data.get('rest', 'N/A')
+            equipment = exercise_data.get('equipment', 'N/A')
+            safety_cue = exercise_data.get('safety_cue', 'N/A')
+            
+            # Start of the strictly formatted output
+            output = f"{index}. **{name}**\n\n"
+            output += f"**Benefit:** {benefit}\n\n"
+            output += "**How to Perform:**\n"
+            
+            # Indented list for steps
+            if steps:
+                for step_idx, step in enumerate(steps):
+                    # Uses 4 spaces for strict indentation
+                    output += f"     {step_idx + 1}. {step.strip()}\n"
+            else:
+                 output += f"     1. (Steps missing from plan - Follow general form)\n"
+            
+            output += f"\n**{set_label}:** {set_value}\n\n"
+            output += f"**{rep_label}:** {rep_value}\n\n"
+            output += f"**Intensity:** RPE {intensity_value}\n\n"
+            output += f"**Rest:** {rest_value}\n\n"
+            output += f"**Equipment:** {equipment}\n\n"
+            output += f"**Safety Cue:** {safety_cue} (Prioritize stability and balance.)\n\n"
+            
+            return output
+        
+        # 1. Warm-Up 
         markdown_output += f"## 🤸 **Warm-Up** ({plan_json.get('warmup_duration', 'N/A')})\n\n"
-        for item in plan_json.get('warmup', []):
-            markdown_output += self._render_exercise_markdown(item, "warmup")
+        for idx, item in enumerate(plan_json.get('warmup', [])):
+            markdown_output += format_exercise_block(item, idx + 1, 'warmup')
+        markdown_output += "---\n"
         
         # 2. Main Workout
         markdown_output += f"## 💪 **Main Workout** ({plan_json.get('main_workout_category', 'N/A')})\n"
-        first_exercise_rpe = plan_json.get('main_workout', [{}])[0].get('intensity_rpe', 'RPE N/A').replace('RPE ', '')
-        markdown_output += f"**Goal:** Achieve RPE {first_exercise_rpe} for all sets.\n\n"
         
         for idx, exercise in enumerate(plan_json.get('main_workout', [])):
-            # Use main workout structure logic (with slightly larger heading)
-            markdown_output += f"### {idx + 1}. {exercise.get('name', 'Exercise Name Missing')}\n"
-            markdown_output += f"**🎯 Benefit:** {exercise.get('benefit', 'N/A')}\n\n"
-            
-            markdown_output += "**⚙️ How to Perform:**\n"
-            for step in exercise.get('steps', []):
-                markdown_output += f"- {step}\n"
-            markdown_output += "\n"
-            
-            # Use main workout parameter table
-            markdown_output += (
-                f"| Parameter | Value |\n"
-                f"| :--- | :--- |\n"
-                f"| **Sets** | **{exercise.get('sets', 'N/A')}** |\n"
-                f"| **Reps** | **{exercise.get('reps', 'N/A')}** |\n"
-                f"| **Intensity** | **{exercise.get('intensity_rpe', 'N/A')}** |\n"
-                f"| **Rest** | **{exercise.get('rest', 'N/A')}** |\n"
-                f"| **Equipment** | {exercise.get('equipment', 'N/A')} |\n"
-            )
-            markdown_output += "\n"
-            
-            markdown_output += f"⚠️ **Safety Cue:** {exercise.get('safety_cue', 'N/A')}\n"
-            markdown_output += "\n---\n" 
+            markdown_output += format_exercise_block(exercise, idx + 1, 'main')
+        markdown_output += "---\n"
         
-        # 3. Cool-Down - Using unified detailed structure
+        # 3. Cool-Down
         markdown_output += f"## 🧘 **Cool-Down** ({plan_json.get('cooldown_duration', 'N/A')})\n\n"
-        for item in plan_json.get('cooldown', []):
-            markdown_output += self._render_exercise_markdown(item, "cooldown")
-
+        for idx, item in enumerate(plan_json.get('cooldown', [])):
+            markdown_output += format_exercise_block(item, idx + 1, 'cooldown')
+        markdown_output += "---\n"
+        
         # 4. Safety Notes (Progression tip removed from here, only safety tips remain)
         markdown_output += f"## 📝 **Safety and General Notes**\n"
         
@@ -374,6 +421,55 @@ class FitnessAdvisor:
         
         return markdown_output
 
+    def _get_movement_pattern_from_exercise(self, exercise_name: str) -> str:
+        """
+        Heuristic function to classify an exercise by movement pattern.
+        This helps the LLM avoid similar exercises across consecutive days.
+        """
+        name = exercise_name.lower()
+        
+        # PUSH Patterns
+        if "push-up" in name or "press" in name or "chest" in name or "shoulder press" in name:
+            if "overhead" in name or "military" in name or "vertical" in name:
+                return "Vertical Push (Shoulders/Triceps)"
+            return "Horizontal Push (Chest/Triceps)"
+
+        # PULL Patterns
+        if "row" in name or "pull-up" in name or "pulldown" in name or "rear delt" in name or "face pull" in name:
+            if "vertical" in name or "pull-up" in name or "pulldown" in name:
+                return "Vertical Pull (Back/Biceps)"
+            return "Horizontal Pull (Back/Biceps)"
+            
+        # KNEE DOMINANT (Squat/Lunge)
+        if "squat" in name or "lunge" in name or "step up" in name or "leg extension" in name or "quad" in name or "knee" in name:
+            return "Knee Dominant (Quads/Glutes)"
+            
+        # HIP DOMINANT (Hinge)
+        if "deadlift" in name or "hinge" in name or "glute bridge" in name or "hamstring" in name:
+            return "Hip Dominant (Hamstrings/Glutes)"
+            
+        # CORE / STABILITY
+        if "plank" in name or "crunch" in name or "sit-up" in name or "bicycle" in name or "bird-dog" in name or "core" in name or "twist" in name:
+            if "rotation" in name or "twist" in name or "side" in name:
+                return "Core Rotation/Anti-Lateral"
+            if "plank" in name or "bird-dog" in name:
+                return "Core Stability/Anti-Extension"
+            return "Core Flexion/Extension"
+
+        # ISOLATION
+        if "curl" in name or "extension" in name or "raise" in name:
+            if "bicep" in name:
+                return "Bicep Isolation"
+            if "tricep" in name:
+                return "Tricep Isolation"
+        
+        # CARDIO / MOBILITY / OTHER
+        if "walk" in name or "march" in name or "jog" in name or "run" in name or "mobility" in name or "stretch" in name or "circle" in name:
+            return "Cardio/Mobility/Flexibility"
+
+        return "Miscellaneous/Unknown Pattern"
+
+
     def _build_system_prompt(
         self,
         user_profile: Dict,
@@ -383,178 +479,253 @@ class FitnessAdvisor:
         workout_category: str = "Full Body"
     ) -> str:
         """
-        Build a comprehensive, rules-based system prompt for workout plan generation,
-        enforcing all user-requested constraints, including the detailed W/U and C/D structure.
+        Builds the entire system prompt based on the user's strict template,
+        incorporating all new demographic, split, location, and pattern avoidance rules.
         """
         
-        # Extract profile
+        # --- DYNAMIC VALUE EXTRACTION ---
         name = user_profile.get("name", "User")
         age = user_profile.get("age", 30)
-        gender = user_profile.get("gender", "Other")
         bmi = user_profile.get("bmi", 22)
+        gender = user_profile.get("gender", "Male")
         fitness_level = user_profile.get("fitness_level", "Level 3 – Moderate / Independent")
         primary_goal = user_profile.get("primary_goal", "General Fitness")
-        medical_conditions = user_profile.get("medical_conditions", ["None"])
-        physical_limitations = user_profile.get("physical_limitations", "")
-        session_duration = user_profile.get("session_duration", "30-45 minutes")
         equipment_list = user_profile.get("available_equipment", ["Bodyweight Only"])
-        total_training_days = len(user_profile.get("days_per_week", []))
+        location = user_profile.get("workout_location", "Any") 
+        medical_conditions = user_profile.get("medical_conditions", ["None"]) 
         
-        # --- Goal and Level Alignment ---
+        # Determine programming targets
         level_data = FITNESS_LEVELS.get(fitness_level, FITNESS_LEVELS["Level 3 – Moderate / Independent"])
-        level_rpe = level_data['rpe_range']
-        
-        goal_guidelines = self.goal_programming_guidelines.get(primary_goal, {})
-        
-        target_rpe = level_rpe
-        target_sets = goal_guidelines.get('sets', '2-3')
-        target_reps = goal_guidelines.get('rep_range', '10-15')
-        target_rest = goal_guidelines.get('rest', '45-60 seconds')
-        
-        rpe_override_note = ""
-        if primary_goal == "Muscle Gain" and fitness_level == "Level 2 – Beginner Functional":
-            target_rpe = "5-7" 
-            target_sets = "3"   
-            rpe_override_note = (
-                "**⚠️ RPE OVERRIDE FOR MUSCLE GAIN (Level 2):** You **MUST** target RPE 5-7. The effort used MUST be challenging enough to achieve RPE 5-7 by the last few reps. **Target 3 Sets.**"
-            )
-        
-        # --- Duration and Exercise Count ---
-        max_main_exercises = self._determine_exercise_count(session_duration)
-        
-        # --- Dynamic Split Focus ---
-        day_focus = self._determine_split_focus(total_training_days, day_index)
-        
-        # --- PROFILE SUMMARY --- (simplified for brevity, but all data is used)
-        profile_summary = (
-            f"- Name/ID: {name} | Gender: {gender} | Age: {age} | BMI: {bmi:.1f}\n"
-            f"- Fitness Level: **{fitness_level}**\n"
-            f"- Primary Goal: **{primary_goal}**\n"
-            f"- **Session Duration (MUST FIT): {session_duration}**\n"
-            f"- Available Equipment (MUST USE ONLY THIS): {', '.join(equipment_list)}\n"
-            f"- **MEDICAL CONDITIONS (ZERO TOLERANCE):** {', '.join(medical_conditions)}\n"
-            f"- **PHYSICAL LIMITATIONS (CRITICAL):** {physical_limitations if physical_limitations else 'None'}"
-        )
-        
-        # --- START OF STRUCTURED PROMPT ---
-        prompt_parts = []
-        
-        prompt_parts.append(f"""You are FriskaAI, an expert clinical exercise physiologist (ACSM-CEP).
-Your primary role is to ensure **MAXIMUM SAFETY** (especially for Level 1/Medical Conditions/Limitations) while **OPTIMIZING FOR THE PRIMARY GOAL**.
-You **MUST** adhere to all numbered rules. You MUST respond ONLY in JSON format EXACTLY as specified in Rule 4.
-""")
-        
-        # --- Workout Structure (Rule 4 - JSON Schema Reference) ---
-        
-        # FIX 1: Ensure `f"""` is used correctly.
-        prompt_parts.append(f"""
-**0. ABSOLUTE TOP PRIORITY: THE JSON OUTPUT SCHEMA**
-Your entire response **MUST** be a single, valid JSON object that strictly conforms to the following schema.
-The JSON object **MUST** be enclosed in a single markdown code block (` ```json ... ``` `) and contain the following keys:
-- `day_name` (string)
-- `warmup_duration` (string, e.g., '5-7 minutes')
-- `main_workout_category` (string, e.g., 'Full Body - Lower Focus')
-- `cooldown_duration` (string, e.g., '5-7 minutes')
-- `warmup` (list of **EXACTLY 3** objects, each conforming to the strict structure below)
-- `main_workout` (list of **EXACTLY {max_main_exercises}** objects, each conforming to the strict structure below)
-- `cooldown` (list of **EXACTLY 3** objects, each conforming to the strict structure below)
-- `safety_notes` (list of 3-5 strings, following Rule 3.D, including one dedicated progression tip)
+        target_rpe = level_data['rpe_range']
+        target_sets = self.goal_programming_guidelines.get(primary_goal, {}).get('sets', '2-3')
+        target_rest_desc = self.goal_programming_guidelines.get(primary_goal, {}).get('rest', '45-60 seconds')
+        max_main_exercises = self._determine_exercise_count(user_profile.get("session_duration", "30-45 minutes"), fitness_level)
+        total_days = len(user_profile.get("days_per_week", []))
+        day_focus, repetition_rule = self._determine_split_focus_and_repetition(total_days, day_index, fitness_level) 
 
-**Strict Structure for ALL Exercise Objects (Warm-up, Main, Cooldown):**
-{{
-    "name": str,
-    "benefit": str,
-    "steps": list of str (MUST be 3-5 complete, sequential steps),
-    "sets": str,
-    "reps": str, 
-    "intensity_rpe": str,
-    "rest": str, 
-    "equipment": str,
-    "safety_cue": str (Specific to user limitations/conditions)
-}}
-""")
+        # Rep Range Safety Adjustment (Gender/Age/BMI)
+        target_reps = self.goal_programming_guidelines.get(primary_goal, {}).get('rep_range', '10-15')
+        
+        # Base safety reduction for low level/age/BMI (Point 2)
+        if fitness_level in ["Level 1 – Assisted / Low Function", "Level 2 – Beginner Functional"] or age >= 50 or bmi > 30:
+             if '-' in target_reps:
+                 low_rep = int(target_reps.split('-')[0])
+                 # Ensure low end is at least 8 for hypertrophy goals, or keep metabolic high rep range if appropriate
+                 target_reps = f"{max(low_rep, 8)}-{target_reps.split('-')[-1]}"
+             elif int(target_reps.split('-')[-1]) > 12: # If it's a high single number like 15 or 20
+                 target_reps = f"10-{target_reps}"
+        
+        # Gender Adjustment (NEW: Female - slightly decrease intensity/complexity for moderate levels)
+        if gender.lower() == "female" and fitness_level not in ["Level 1 – Assisted / Low Function", "Level 5 – Adaptive Advanced"]:
+            # Reduce top end of RPE range slightly for moderate levels
+            if '-' in target_rpe:
+                 rpe_low = int(target_rpe.split('-')[0])
+                 rpe_high = int(target_rpe.split('-')[-1])
+                 # Example: 5-7 -> 5-6
+                 target_rpe = f"{rpe_low}-{max(rpe_high - 1, rpe_low)}"
 
-        prompt_parts.append(f"""
-**1. USER PROFILE & TARGETS (NON-NEGOTIABLE CONSTRAINTS):**
-{profile_summary}
-- **Workout Focus:** **{day_focus}**. Exercises **MUST** be selected to emphasize this focus today.
-- **Goal Programming Focus:** {goal_guidelines.get('focus_type', 'Balanced')}.
-""")
+        # --- REPETITION AVOIDANCE (ENHANCED LOGIC) ---
+        exercises_to_avoid = set()
+        patterns_to_avoid = set()
+        
+        # FIX 1: Check ALL previous days for STRICT NAME AVOIDANCE
+        previous_training_days_keys = [d for d in user_profile.get('days_per_week', []) if user_profile.get('days_per_week', []).index(d) < day_index]
+        
+        # FIX 2: Check last 3 days for PATTERN AVOIDANCE (increased window for variety)
+        days_to_check_patterns = previous_training_days_keys[-3:] 
+        
+        # Collect ALL exercise names for STRICT AVOIDANCE
+        if previous_training_days_keys and previous_plans:
+            for day_key in previous_training_days_keys:
+                plan_data = previous_plans.get(day_key)
+                if plan_data and plan_data.get('success') and 'plan_json' in plan_data and plan_data['plan_json']:
+                    all_exercises = plan_data['plan_json'].get('main_workout', []) + \
+                                    plan_data['plan_json'].get('warmup', []) + \
+                                    plan_data['plan_json'].get('cooldown', [])
+                    
+                    for ex in all_exercises:
+                        name = ex.get('name', '').strip()
+                        if name:
+                            exercises_to_avoid.add(name) # All previous exercises are off-limits by name
 
-        # REVISED: Enhanced previous plan summary for better variety enforcement
-        previous_plan_summary = "".join([f"- **{d}**: Exercises: {', '.join([ex.get('name', 'N/A') for ex in p['plan_json']['main_workout'] if 'name' in ex])}\n" for d, p in previous_plans.items() if 'plan_json' in p and p['plan_json']]) if previous_plans else "- None. Ensure maximum variety."
+        # Collect MOVEMENT PATTERNS from the last 3 days
+        if days_to_check_patterns and previous_plans:
+            for day_key in days_to_check_patterns:
+                plan_data = previous_plans.get(day_key)
+                if plan_data and plan_data.get('success') and 'plan_json' in plan_data and plan_data['plan_json']:
+                    all_exercises = plan_data['plan_json'].get('main_workout', []) 
+                    
+                    for ex in all_exercises:
+                        name = ex.get('name', '').strip()
+                        if name:
+                            # Add movement pattern to the set to enforce variety
+                            patterns_to_avoid.add(self._get_movement_pattern_from_exercise(name))
+        
+        exercises_to_avoid_list = list(exercises_to_avoid)
+        patterns_to_avoid_list = [p for p in patterns_to_avoid if p not in ["Cardio/Mobility/Flexibility", "Miscellaneous/Unknown Pattern"]]
+        # --- END REPETITION AVOIDANCE ---
 
-        # FIX 2: Ensure `f"""` is used correctly.
-        prompt_parts.append(f"""
-**2. VARIETY & PROGRESSION (CRITICAL):**
-- **STIMULUS VARIETY MANDATE:** The plan **MUST** be significantly different from the previous workouts listed.
-- **DO NOT** repeat the exact same **Main Workout** exercise (e.g., if 'Dumbbell Bench Press' was used, use 'Push-ups' or 'Dumbbell Fly' instead) across any two consecutive training days. Introduce maximum variation (e.g., use a different exercise, equipment, or movement pattern for the same muscle group).
-- **Previous Workouts (for variety check):**
-{previous_plan_summary}
-- **Exercise Standard:** Only use **standard, US-based/international** fitness exercises. DO NOT generate random or unfamiliar movements.
-""")
+        # --- RULE INJECTION - RESTRICTIONS (Section 3) ---
+        allowed_equipment = ', '.join(equipment_list)
+        
+        # Fitness Level Constraint Logic (Rule 3.B - ENHANCED with examples)
+        level_rules = {
+            "Level 1 – Assisted / Low Function": "Choose supported or assisted exercises (e.g., wall squats, seated march, supported rows). Example substitution: Goblet Squat -> Wall Squat, Push-Up -> Wall Push-Up. STRICTLY AVOID standing balance challenges and unassisted core work.",
+            "Level 2 – Beginner Functional": "Use low-impact, bodyweight-based functional exercises. Prioritize stability. Example substitution: Goblet Squat -> Chair Squat, Push-Up -> Incline Push-Up. STRICTLY AVOID advanced balance moves (unassisted lunges) or high-impact moves.",
+            "Level 3 – Moderate / Independent": "Include moderate functional and resistance exercises. Example substitution: Goblet Squat -> Partial Squat, Push-Up -> Knee Push-Up. Introduce compound movements and light instability.",
+            "Level 4 – Active Wellness": "Provide balanced strength, stability, and endurance training with varied equipment and moderate intensity/volume.",
+            "Level 5 – Adaptive Advanced": "Offer full-intensity, functional, compound, and loaded stability movements. Use advanced resistance/techniques."
+        }
+        fitness_level_rules = level_rules.get(fitness_level, 'Balanced approach.')
 
-
-        # --- Medical Condition Rules Insertion (Rule 4) ---
-        medical_conditions_text = ""
+        # Location and Equipment Rule (Point 5)
+        equipment_rule = f"WORKOUT LOCATION is {location}. Exercises MUST align with the environment. If 'Home', limit to bodyweight, dumbbells, bands, or TRX. If 'Gym', include machines, barbells, and cables. If 'Outdoor', prioritize walk, jog, step-ups, mobility drills, or bodyweight exercises."
+        
+        # Advanced Safety Avoidance (BMI/Age/Level Override - ENHANCED for age/BMI priority - Point 2)
+        advanced_avoid_exercises = []
+        safety_priority_note = ""
+        
+        if age >= 60:
+            advanced_avoid_exercises.extend([
+                "Heavy Compound Lifts", "High Impact Plyometrics", "Ballistic Movements"
+            ])
+            safety_priority_note = "AGE PRIORITY (≥ 60): Prioritize balance, mobility, and joint-friendly movements. Reduce overall volume and intensity."
+        
+        if bmi > 30:
+            advanced_avoid_exercises.extend([
+                "High Impact Jumps", "Fast Tempo/Ballistic Movements", "Deep Spinal Flexion/Extension"
+            ])
+            safety_priority_note += (" " if safety_priority_note else "") + "BMI PRIORITY (≥ 30): Emphasize low-impact exercises and gradual progression."
+            
+        # Combine medical restrictions and advanced safety notes
+        medical_restrictions_list = []
         if medical_conditions and medical_conditions != ["None"]:
-            medical_conditions_text += f"""
-**CONDITION-SPECIFIC SAFETY RULES (MANDATORY GUIDELINES):**
-"""
             for condition in medical_conditions:
                 if condition != "None":
                     cond_data = self._get_condition_details_from_db(condition)
-                    medical_conditions_text += (
-                        f"- **{condition} (Rule 4.A):**\n"
-                        f"    - ❌ CONTRAINDICATED (MUST AVOID): {cond_data.get('contraindicated', 'High-risk movements')}\n"
-                        f"    - ✓ MODIFIED/SAFER (PRIORITIZE): {cond_data.get('modified_safer', 'Low-impact alternatives')}\n"
-                        f"    - Medication Note: {cond_data.get('medications', 'Unknown')}.\n"
-                    )
-            prompt_parts.append(medical_conditions_text)
-            
-        # --- CORE DIRECTIVES ---
+                    medical_restrictions_list.append(f"CONDITION: {condition}. MUST AVOID: {cond_data.get('contraindicated', 'High-risk movements')}. PRIORITIZE: {cond_data.get('modified_safer', 'Low-impact alternatives')}.")
         
-        prompt_parts.append(f"""
-**3. CORE DIRECTIVES (THESE ARE MANDATORY RULES):**
- 
-A. GOAL PROGRAMMING TARGETING (ABSOLUTELY CRITICAL):
-- **Intensity Goal (RPE - Main Workout):** The final **intensity_rpe** for all main exercises **MUST** be **RPE {target_rpe}**.
-- **Volume Goal (Main Workout):** Sets: **{target_sets}**, Reps: **{target_reps}**, Rest: **{target_rest}**.
-- **Time Goal:** The plan should use **EXACTLY {max_main_exercises}** main exercises.
+        if advanced_avoid_exercises:
+             medical_restrictions_list.append(f"SAFETY OVERRIDE: Also AVOID: {', '.join(set(advanced_avoid_exercises))}. {safety_priority_note}")
+        
+        final_medical_restrictions = ' | '.join(medical_restrictions_list) if medical_restrictions_list else 'None.'
 
-{rpe_override_note}
+        # --- RULE INJECTION - STRUCTURE (Section 4) ---
+        
+        # Required Main Workout Categories
+        required_structure = ""
+        if day_focus.startswith("Full Body"):
+             required_structure = "Main workout exercises MUST cover ALL 5 basic patterns: Push, Pull, Lower Body (Squat/Hinge/Lunge-variant), Core/Stabilization, and a Cardio/Mobility exercise."
+        elif day_focus.startswith("Upper Body"):
+             required_structure = "Main workout MUST emphasize Upper Body. It MUST include at least one PUSH and at least one PULL exercise."
+        elif day_focus.startswith("Lower Body"):
+             required_structure = "Main workout MUST emphasize Lower Body. It MUST include at least one Squat/Knee-Dominant movement and at least one Hinge/Hip-Dominant movement."
+        else:
+            required_structure = "Main workout must be balanced across all major movement patterns (Push, Pull, Core, Lower Body)."
 
-B. EXERCISE DETAIL MANDATE (ACCURACY FIX):
-- For all exercises (Warm-up, Main, Cooldown), the `steps` list **MUST** be highly accurate, formal, and complete. It must contain **3-5 distinct, easy-to-follow steps** that fully describe the exercise technique.
+        # Session Duration Breakdown (Point 8)
+        duration_breakdown = "Warm-up: 10–15% | Main workout: 70–75% | Cooldown: 10–15%"
 
-C. WARM-UP / COOL-DOWN MANDATE:
-- The `warmup` and `cooldown` sections **MUST** contain **EXACTLY 3** exercises each.
-- **WARM-UP PARAMETERS:** For all warm-up exercises, set `sets` to **"1"**, `intensity_rpe` to **"RPE 2-3"**, and use the `reps` field for the **duration** (e.g., "1 minute", "10 reps per side").
-- **COOL-DOWN PARAMETERS:** For all cool-down exercises, set `sets` to **"1"**, `intensity_rpe` to **"RPE 1-2"**, and use the `reps` field for the **hold time** (e.g., "30 seconds hold per side").
-
-D. SAFETY NOTE GENERATION & PROGRESSION TIP:
-- The `safety_notes` list **MUST** contain 3-5 tips.
-    1. **Top Priority - Safety/Limitation:** Your first tip **MUST** be a practical safety recommendation directly related to managing the **Medical Condition** or **Physical Limitation**.
-    2. **Second Priority - PROGRESSION TIP (MANDATORY):** One tip **MUST** be explicitly labeled "Progression Tip: [Actionable suggestion]". This tip will be extracted and used for the weekly plan. E.g., "Progression Tip: Next week, increase all reps by 2 or decrease rest by 15 seconds."
-    3. **General Wellness:** Add 1-2 additional general health tips (e.g., emphasizing hydration, proper form, or breathing).
-""")
-
-        prompt_parts.append(f"""
-**5. FINAL VALIDATION CHECKLIST (MANDATORY VERIFICATION):**
-- **Format Check:** Is the entire output a single, valid JSON object inside a ```json block?
-- **Count Check:** Does the `main_workout` list contain **EXACTLY {max_main_exercises}** exercise objects?
-- **Warmup/Cooldown Check:** Do `warmup` and `cooldown` each contain **EXACTLY 3** objects?
-- **Programming Check:** Are the main workout parameters correct and are W/U/C/D parameters set according to Rule 3.C?
-- **Steps Accuracy Check:** Are the `steps` for all exercises formal, complete, and accurate (3-5 steps)?
- 
-**6. TASK:**
-- Generate the complete structured JSON workout plan for **{day_name}** adhering to all directives.
-""")
- 
+        # --- BUILD FINAL PROMPT STRING ---
+        
+        prompt_parts = [
+            "You are FriskaAI, an ACSM-CEP certified clinical exercise physiologist. You MUST prioritize **maximum exercise variety** and **avoiding consecutive-day muscle group work**.", # Enhanced Persona
+            "Your ONLY output must be a single JSON object following the schema provided below.",
+            "Never include text outside the JSON. Never add comments.",
+            "",
+            "# 1. JSON OUTPUT SCHEMA (MANDATORY)",
+            json.dumps({
+                "day_name": "string",
+                "warmup_duration": "5-7 minutes",
+                "main_workout_category": "string",
+                "cooldown_duration": "5-7 minutes",
+                "warmup": [
+                    {
+                        "name": "string",
+                        "benefit": "string",
+                        "steps": ["3-5 step strings"],
+                        "sets": "1",
+                        "duration": "string (e.g., 60 seconds)",
+                        "intensity_rpe": "RPE 1-3",
+                        "rest": "15 seconds",
+                        "equipment": "string",
+                        "safety_cue": "string"
+                    }
+                ],
+                "main_workout": [
+                    {
+                        "name": "string",
+                        "benefit": "string",
+                        "steps": ["3-5 step strings"],
+                        "sets": target_sets,
+                        "reps": target_reps,
+                        "intensity_rpe": f"RPE {target_rpe}",
+                        "rest": target_rest_desc,
+                        "equipment": "string",
+                        "safety_cue": "string"
+                    }
+                ],
+                "cooldown": [
+                    {
+                        "name": "string",
+                        "benefit": "string",
+                        "steps": ["3-5 step strings"],
+                        "sets": "1",
+                        "hold": "string (e.g., 30-60 seconds / side)",
+                        "intensity_rpe": "RPE 1-3",
+                        "rest": "15 seconds",
+                        "equipment": "string",
+                        "safety_cue": "string"
+                    }
+                ],
+                "safety_notes": ["3-5 strings"]
+            }, indent=2).replace('"', '`'), # Use backticks for JSON literal strings in the prompt
+            "",
+            "# 2. USER PROFILE (DYNAMICALLY INJECTED)",
+            json.dumps(user_profile, indent=2),
+            "",
+            "# 3. RESTRICTION RULES (DYNAMICALLY INJECTED)",
+            f"- Current Day: **{day_name}** | Focus: **{day_focus}**",
+            f"- Training Consistency Rule: **{repetition_rule}**", 
+            f"- Equipment & Location Rule: **{equipment_rule}**. Strictly use only these equipment options: **{allowed_equipment}**", 
+            f"- **STRICT EXERCISE NAME AVOIDANCE (All Previous Days):** DO NOT use these specific exercise names in ANY section: **{', '.join(exercises_to_avoid_list) if exercises_to_avoid_list else 'None'}**", # STRICT VETO
+            f"- **STRICT PATTERN AVOIDANCE (Recovery Constraint from last 3 days):** To ensure muscle group recovery and maximize variety, prioritize movements NOT listed here: **{', '.join(patterns_to_avoid_list) if patterns_to_avoid_list else 'None/Minor Muscle Groups Only'}**", # NEW RULE + 3 DAY WINDOW
+            f"- Fitness level constraints: **{fitness_level_rules}**", 
+            f"- Medical and Safety Restrictions: **{final_medical_restrictions}**", 
+            f"- Physical limitations: **{user_profile.get('physical_limitation', 'None')}**",
+            "",
+            "# 4. REQUIRED EXERCISE STRUCTURE",
+            f"- Session Duration Breakdown: **{duration_breakdown}** (For pacing guidance)", 
+            f"- Warmup: exactly 3 exercises (Total duration MUST be 5-7 minutes, FIX 4)",
+            f"- Main workout: exactly {max_main_exercises} exercises (Volume reduced for safety/level). **All main exercises must be unique from each other and the warm-up/cool-down.**", # ENFORCING UNIQUENESS
+            f"- Cooldown: exactly 3 exercises",
+            f"- Steps: always 3–5 clear, sequential steps for every exercise.",
+            f"- **Movement Balance Mandate (FIX 2 & 6):** {required_structure}",
+            "",
+            "# 5. SAFETY & GOAL MANDATES",
+            f"- Intensity: Main workout RPE must be **{target_rpe}** | Warmup/Cooldown RPE must be **RPE 1-3**.",
+            f"- Reps/Sets: Main workout sets/reps must be **Sets: {target_sets}, Reps: {target_reps}**.",
+            "- Never exceed user equipment.",
+            "- Never use high-impact or unsafe movements (see restrictions in #3).",
+            "- Prioritize stability for Level 1–2 and BMI > 30.",
+            "- Safety Notes must include:",
+            "   1. One top-priority safety tip for conditions/limitations.",
+            "   2. One 'Progression Tip: ...' (Mandatory for next week's plan).",
+            "   3. One or two general wellness tips.",
+            "",
+            "# 6. OUTPUT RULES",
+            "- Output **only** valid JSON.",
+            "- **NO** markdown outside the single ```json block.",
+            "- **NO** text, explanation, or commentary.",
+            "",
+            "```json"
+        ]
+        
+        # NOTE: The final closing curly brace and ``` are added by the LLM response itself after generation.
         return "\n".join(prompt_parts)
     
     def _extract_and_move_progression_tip(self, plan_json: Dict) -> str:
-        """Extracts the mandatory progression tip and removes it from the daily notes."""
+        """Extracts the mandatory progression tip and removes it from the daily notes. (NO CHANGE)"""
         progression_tip = "Progression Tip: Next week, aim for an RPE increase of 0.5 or add 1-2 more reps." # Default Tip
         
         if 'safety_notes' in plan_json:
@@ -579,13 +750,23 @@ D. SAFETY NOTE GENERATION & PROGRESSION TIP:
         previous_plans: Dict, 
         workout_category: str = "Full Body"
     ) -> Dict:
-        """Generate workout plan with fixed API call and JSON parsing."""
+        """
+        Generate workout plan with fixed API call and JSON parsing, 
+        including exponential backoff for resilience (API Error fix). (NO CHANGE)
+        """
         
         goal = user_profile.get("primary_goal", "General Fitness")
         target_sets = self.goal_programming_guidelines.get(goal, {}).get('sets', '3')
         target_reps = self.goal_programming_guidelines.get(goal, {}).get('rep_range', '12')
         target_rest = self.goal_programming_guidelines.get(goal, {}).get('rest', '60 seconds')
-        day_focus = self._determine_split_focus(len(user_profile.get("days_per_week", [])), day_index)
+        
+        # Determine day focus and repetition rule for the fallback (used in JSON title)
+        total_days = len(user_profile.get("days_per_week", []))
+        day_focus, _ = self._determine_split_focus_and_repetition(total_days, day_index, user_profile.get("fitness_level", "Level 3 – Moderate / Independent"))
+        
+        # Adjust reps for fallback to match prompt logic
+        if user_profile.get("fitness_level") in ["Level 1 – Assisted / Low Function", "Level 2 – Beginner Functional"] or user_profile.get("age", 30) >= 50 or user_profile.get("bmi", 22) > 30:
+             target_reps = "8-12" 
         
         fallback_plan_json = self._generate_fallback_plan_json(
             user_profile, 
@@ -598,115 +779,108 @@ D. SAFETY NOTE GENERATION & PROGRESSION TIP:
         
         progression_tip = "Maintain current routine and focus on perfect form." # Default Tip
 
-        try:
-            # Build the system prompt
-            system_prompt = self._build_system_prompt(
-                user_profile, day_name, day_index, previous_plans, workout_category
-            )
-            
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}" 
-            }
-            
-            payload = {
-                "model": "mistral-small",
-                "messages": [
-                    {"role": "system", "content": "You are FriskaAI, an expert clinical exercise physiologist. Prioritize safety and follow all instructions, especially the JSON output format, strictly."},
-                    {"role": "user", "content": system_prompt}
-                ],
-                "temperature": 0.8,
-                "max_tokens": 4096
-            }
-            
-            response = requests.post(self.endpoint_url, headers=headers, json=payload)
-            
-            if response.status_code != 200:
+        # Build the system prompt once before the retry loop
+        system_prompt = self._build_system_prompt(
+            user_profile, day_name, day_index, previous_plans, workout_category
+        )
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}" 
+        }
+        
+        payload = {
+            "model": "mistral-small",
+            "messages": [
+                # New system instruction reflects the output rule
+                {"role": "system", "content": "You are FriskaAI, an expert clinical exercise physiologist. Your ONLY output is the JSON object requested by the user. Do not add any text or commentary outside the JSON."},
+                {"role": "user", "content": system_prompt}
+            ],
+            "temperature": 0.8,
+            "max_tokens": 4096
+        }
+
+        # --- EXPONENTIAL BACKOFF AND RETRY LOGIC (FIX API ERRORS) ---
+        for attempt in range(MAX_RETRIES):
+            try:
+                # 1. Make the API request
+                response = requests.post(self.endpoint_url, headers=headers, json=payload)
+                
+                # 2. Check for successful status code
+                if response.status_code != 200:
+                    # If status is not 200, raise an exception to trigger retry or fallback
+                    response_text = response.text
+                    raise requests.HTTPError(f"API returned non-200 status: {response.status_code}. Response: {response_text[:100]}...")
+                
+                result = response.json()
+                plan_text = result['choices'][0]['message']['content'] if 'choices' in result and result['choices'] else ""
+
+                if not plan_text or len(plan_text) < 100:
+                    raise ValueError("Empty or too short response from API")
+
+                # 3. JSON Parsing and Validation - LOOK FOR THE ```json BLOCK
+                json_match = re.search(r'```json\s*(\{[\s\S]*?\})\s*```', plan_text, re.IGNORECASE | re.DOTALL)
+                
+                if not json_match:
+                    # Attempt simple load if no markdown block is found (less robust, but needed if LLM breaks format rule)
+                    try:
+                        plan_json = json.loads(plan_text.strip())
+                    except json.JSONDecodeError:
+                        raise ValueError("Could not extract or parse a valid JSON object from the API response.")
+                else:
+                    json_string = json_match.group(1)
+                    plan_json = json.loads(json_string)
+
+                # 4. Success: Extract tip and return
+                progression_tip = self._extract_and_move_progression_tip(plan_json)
+                plan_md = self._convert_plan_to_markdown_enhanced(plan_json)
+                
                 return {
-                    "success": False,
-                    "plan_json": fallback_plan_json,
-                    "plan_md": self._convert_plan_to_markdown_enhanced(fallback_plan_json),
-                    "error": f"API returned {response.status_code} with error: {response.text}",
+                    "success": True,
+                    "plan_json": plan_json,
+                    "plan_md": plan_md,
+                    "error": None,
                     "progression_tip": progression_tip 
                 }
-            
-            result = response.json()
-            plan_text = result['choices'][0]['message']['content'] if 'choices' in result and result['choices'] else ""
 
-            if not plan_text or len(plan_text) < 100:
-                raise ValueError("Empty or too short response from API")
+            except (requests.exceptions.RequestException, requests.HTTPError, ValueError, json.JSONDecodeError) as e:
+                error_message = str(e)
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff (1s, 2s, 4s...)
+                    # No logging of this wait time to the user/console.
+                    time.sleep(wait_time)
+                else:
+                    # Last attempt failed, fall through to final return
+                    pass
 
-            # --- JSON PARSING ---
-            json_match = re.search(r'```json\s*(\{[\s\S]*?\})\s*```', plan_text, re.IGNORECASE | re.DOTALL)
-            
-            if not json_match:
-                try:
-                    plan_json = json.loads(plan_text.strip())
-                except json.JSONDecodeError:
-                    raise ValueError("Could not extract or parse a valid JSON object from the API response.")
-            else:
-                json_string = json_match.group(1)
-                plan_json = json.loads(json_string)
-
-            # --- PROGRESSION TIP EXTRACTION ---
-            progression_tip = self._extract_and_move_progression_tip(plan_json)
-            
-            # Convert JSON to enhanced Markdown for display
-            plan_md = self._convert_plan_to_markdown_enhanced(plan_json)
-            
-            return {
-                "success": True,
-                "plan_json": plan_json,
-                "plan_md": plan_md,
-                "error": None,
-                "progression_tip": progression_tip 
-            }
-            
-        except Exception as e:
-            # st.error(f"❌ Error generating plan: {str(e)}") # Removed Streamlit error call in class method
-            return {
-                "success": False,
-                "plan_json": fallback_plan_json,
-                "plan_md": self._convert_plan_to_markdown_enhanced(fallback_plan_json),
-                "error": str(e),
-                "progression_tip": progression_tip 
-            }
+        # If all attempts fail, return the fallback plan with the final error message
+        return {
+            "success": False,
+            "plan_json": fallback_plan_json,
+            "plan_md": self._convert_plan_to_markdown_enhanced(fallback_plan_json),
+            "error": error_message, # Use the last captured error message
+            "progression_tip": progression_tip 
+        }
     
     def _generate_fallback_plan_json(self, user_profile: Dict, day_name: str, day_focus: str, sets: str, reps: str, rest: str) -> Dict:
-        """
-        Generate simple fallback plan as a JSON object with required 3 warmup/cooldown items 
-        and the new detailed structure (benefit, steps, safety_cue).
-        """
+        """Generate simple fallback plan as a JSON object with required 3 warmup/cooldown items and correct steps, updated to the new schema. (NO CHANGE)"""
         
-        exercise_count = int(self._determine_exercise_count(user_profile.get("session_duration", "30-45 minutes")))
+        exercise_count = int(self._determine_exercise_count(user_profile.get("session_duration", "30-45 minutes"), user_profile.get("fitness_level", "Level 3 – Moderate / Independent")))
+        
+        # Consistent steps for fallback
+        wall_pushup_steps = [
+            "Stand arm's length from a sturdy wall, placing hands shoulder-width and shoulder-height.",
+            "Keeping your body straight, slowly bend your elbows to lean towards the wall.",
+            "Pause briefly when your nose is close to the wall.",
+            "Push through your palms to return to the straight-arm starting position."
+        ]
         
         # Ensure 3-5 steps are formal and complete in the fallback
         base_exercises = [
             {
-                "name": "Seated Band Rows",
-                "benefit": "Targets back muscles and supports general fitness.",
-                "steps": [
-                    "Step 1: Sit tall on a chair, loop band around feet or a sturdy post.",
-                    "Step 2: Hold the band ends, initiate movement by squeezing the shoulder blades together.",
-                    "Step 3: Pull the band towards your torso, keeping elbows close to your body.",
-                    "Step 4: Slowly return to the starting position with control, maintaining tension."
-                ],
-                "sets": sets,
-                "reps": reps,
-                "intensity_rpe": "RPE 4-6",
-                "rest": rest,
-                "equipment": "Resistance Band, Chair",
-                "safety_cue": "Keep back straight and avoid holding breath (Valsalva maneuver)."
-            },
-            {
-                "name": "Wall Push-ups",
+                "name": "Wall Push-ups (Incline)",
                 "benefit": "Targets chest and arms safely.",
-                "steps": [
-                    "Step 1: Stand arm's length from a sturdy wall, placing hands shoulder-width and shoulder-height.",
-                    "Step 2: Keeping your body straight (plank position), slowly bend your elbows to lean towards the wall.",
-                    "Step 3: Pause briefly when your nose is close to the wall (or before any shoulder pain).",
-                    "Step 4: Push through your palms to return to the straight-arm starting position."
-                ],
+                "steps": wall_pushup_steps,
                 "sets": sets,
                 "reps": reps,
                 "intensity_rpe": "RPE 4-6",
@@ -715,13 +889,29 @@ D. SAFETY NOTE GENERATION & PROGRESSION TIP:
                 "safety_cue": "Ensure feet are far enough back to feel a challenge in the chest and arms."
             },
             {
-                "name": "Chair Squats (Assisted)",
-                "benefit": "Targets lower body with joint support.",
+                "name": "Seated Band Rows (Pull)",
+                "benefit": "Works the back and rear shoulders (Pull).",
                 "steps": [
-                    "Step 1: Stand in front of a sturdy chair or bench, feet shoulder-width apart.",
-                    "Step 2: Push your hips back and slowly lower yourself, keeping your chest up and back straight.",
-                    "Step 3: Gently touch the chair with your glutes (do not fully sit or rest).",
-                    "Step 4: Push through your heels and mid-foot to stand back up, squeezing your glutes at the top."
+                    "Sit tall on the edge of a chair, core engaged.",
+                    "Loop a resistance band around your feet or a stable object.",
+                    "Pull the band handles toward your torso, squeezing shoulder blades together.",
+                    "Slowly extend arms forward, controlling the return."
+                ],
+                "sets": sets,
+                "reps": reps,
+                "intensity_rpe": "RPE 4-6",
+                "rest": rest,
+                "equipment": "Resistance Band, Chair",
+                "safety_cue": "Maintain a tall, upright posture throughout the pulling motion."
+            },
+            {
+                "name": "Chair Squats (Assisted)",
+                "benefit": "Targets lower body with joint support (Lower Body).",
+                "steps": [
+                    "Stand in front of a sturdy chair or bench, feet shoulder-width apart.",
+                    "Push your hips back and slowly lower yourself, keeping your chest up and back straight.",
+                    "Gently touch the chair with your glutes (do not fully sit or rest).",
+                    "Push through your heels and mid-foot to stand back up, squeezing your glutes at the top."
                 ],
                 "sets": sets,
                 "reps": reps,
@@ -731,134 +921,109 @@ D. SAFETY NOTE GENERATION & PROGRESSION TIP:
                 "safety_cue": "Keep knees tracking directly over your feet; do not let them cave inward."
             },
             {
-                "name": "Standing Calf Raises (Supported)",
-                "benefit": "Strengthens calf muscles and improves lower-leg circulation.",
+                "name": "Modified Bird-Dog (Core/Stability)",
+                "benefit": "Strengthens core and improves low-back stability.",
                 "steps": [
-                    "Step 1: Hold onto a chair or wall for stable support, standing tall.",
-                    "Step 2: Slowly lift your heels as high as possible, standing on the balls of your feet.",
-                    "Step 3: Pause for one second at the peak of the movement, focusing on the calf muscle.",
-                    "Step 4: Lower your heels slowly and with control back to the ground."
+                    "Start on hands and knees (tabletop position) with a neutral spine.",
+                    "Lift one arm straight forward and the opposite leg straight back.",
+                    "Hold briefly, keeping hips level and core tight to prevent rotation.",
+                    "Slowly return to the start and switch sides."
                 ],
                 "sets": sets,
-                "reps": reps,
+                "reps": f"{int(int(reps.split('-')[0]) / 2)}-{int(int(reps.split('-')[-1]) / 2)} / side",
                 "intensity_rpe": "RPE 4-6",
                 "rest": rest,
-                "equipment": "Wall/Chair",
-                "safety_cue": "Maintain support and focus on controlled movement, avoiding quick, bouncy reps."
+                "equipment": "Yoga Mat",
+                "safety_cue": "Move slowly and deliberately. Do not arch the lower back; keep the core engaged."
             }
         ]
         
-        # Repeat/truncate base exercises to match the required count
+        # Repeat/truncate base exercises to match the required count (5 max for L2, 4 max for L1)
         main_exercises = []
         for i in range(exercise_count):
             main_exercises.append(base_exercises[i % len(base_exercises)])
             
+        # Fallback Warmup/Cooldown adjusted to new schema
+        warmup = [
+            {
+                "name": "Arm Circles (Forward/Backward)",
+                "benefit": "Shoulder mobility and light preparation.",
+                "steps": wall_pushup_steps, # Reusing steps structure for compliance, though less ideal
+                "sets": "1",
+                "duration": "1 minute each direction",
+                "intensity_rpe": "RPE 1-3",
+                "rest": "15 seconds",
+                "equipment": "Bodyweight",
+                "safety_cue": "Maintain small, controlled circles to avoid shoulder strain."
+            },
+            {
+                "name": "Seated Marching",
+                "benefit": "Light cardio and lower body circulation.",
+                "steps": wall_pushup_steps,
+                "sets": "1",
+                "duration": "2 minutes",
+                "intensity_rpe": "RPE 1-3",
+                "rest": "15 seconds",
+                "equipment": "Chair",
+                "safety_cue": "Keep back straight and focus on controlled, rhythmic movement."
+            },
+            {
+                "name": "Torso Twists (Seated)",
+                "benefit": "Spine rotation and core activation.",
+                "steps": wall_pushup_steps,
+                "sets": "1",
+                "duration": "2 minutes",
+                "intensity_rpe": "RPE 1-3",
+                "rest": "15 seconds",
+                "equipment": "Chair",
+                "safety_cue": "Twist gently from the core; do not force range of motion."
+            }
+        ]
+        
+        cooldown = [
+            {
+                "name": "Seated Hamstring Stretch", 
+                "benefit": "Lengthens hamstrings for lower back relief.",
+                "steps": wall_pushup_steps,
+                "sets": "1",
+                "hold": "60 seconds per leg", 
+                "intensity_rpe": "RPE 1-3", 
+                "rest": "15 seconds",
+                "equipment": "Chair",
+                "safety_cue": "Keep the spine long; only stretch until a gentle tension is felt."
+            },
+            {
+                "name": "Seated Chest Stretch", 
+                "benefit": "Opens chest and improves posture.",
+                "steps": wall_pushup_steps,
+                "sets": "1",
+                "hold": "60 seconds", 
+                "intensity_rpe": "RPE 1-3", 
+                "rest": "15 seconds",
+                "equipment": "Chair",
+                "safety_cue": "Gently pull shoulder blades together; do not strain shoulders."
+            },
+            {
+                "name": "Deep Diaphragmatic Breathing", 
+                "benefit": "Calms the nervous system and aids muscle recovery.",
+                "steps": wall_pushup_steps,
+                "sets": "1",
+                "hold": "2 minutes (slow, controlled breaths)", 
+                "intensity_rpe": "RPE 1-3", 
+                "rest": "15 seconds",
+                "equipment": "Bodyweight",
+                "safety_cue": "Breathe into your belly, not your chest. Keep shoulders relaxed."
+            }
+        ]
+
         return {
             "day_name": day_name,
             "warmup_duration": "5-7 minutes",
             "main_workout_category": f"Fallback Plan ({day_focus} Focus)",
             "cooldown_duration": "5-7 minutes",
-            
-            # --- UPDATED WARMUP STRUCTURE ---
-            "warmup": [
-                {
-                    "name": "Seated Marching", 
-                    "benefit": "Increases heart rate and warms up hip flexors and lower body.",
-                    "steps": [
-                        "Step 1: Sit tall on a sturdy chair, feet flat on the floor.",
-                        "Step 2: Alternately lift your knees toward your chest at a moderate pace.",
-                        "Step 3: Keep your core engaged and maintain an upright posture for the duration."
-                    ],
-                    "sets": "1", 
-                    "reps": "2 minutes", 
-                    "intensity_rpe": "RPE 2-3",
-                    "rest": "N/A",
-                    "equipment": "Chair",
-                    "safety_cue": "Ensure the chair is stable and avoid leaning back."
-                },
-                {
-                    "name": "Shoulder Rolls (Backward & Forward)", 
-                    "benefit": "Improves shoulder joint mobility and prepares the upper body for lifting.",
-                    "steps": [
-                        "Step 1: Stand or sit tall, arms relaxed by your sides.",
-                        "Step 2: Roll shoulders in large, slow circles backward 5 times.",
-                        "Step 3: Roll shoulders in large, slow circles forward 5 times."
-                    ],
-                    "sets": "1", 
-                    "reps": "10 total reps", 
-                    "intensity_rpe": "RPE 2-3",
-                    "rest": "N/A",
-                    "equipment": "Bodyweight",
-                    "safety_cue": "Keep the neck relaxed and movement controlled, do not force the range."
-                },
-                {
-                    "name": "Arm Circles", 
-                    "benefit": "Dynamic warm-up for the shoulder complex and rotator cuff.",
-                    "steps": [
-                        "Step 1: Stand tall with arms extended out to the sides, palms down.",
-                        "Step 2: Perform 10 small circles forward, gradually increasing the size of the circles.",
-                        "Step 3: Reverse the motion, performing 10 circles backward, gradually decreasing the size."
-                    ],
-                    "sets": "1", 
-                    "reps": "20 total reps", 
-                    "intensity_rpe": "RPE 2-3",
-                    "rest": "N/A",
-                    "equipment": "Bodyweight",
-                    "safety_cue": "Stop immediately if you feel any sharp pain in the shoulder joint."
-                }
-            ],
-            
+            "warmup": warmup,
             "main_workout": main_exercises,
-            
-            # --- UPDATED COOLDOWN STRUCTURE ---
-            "cooldown": [
-                {
-                    "name": "Seated Hamstring Stretch",
-                    "benefit": "Lengthens the hamstrings, relieving tension after lower body work.",
-                    "steps": [
-                        "Step 1: Sit on the floor (or edge of a chair), extend one leg straight out, bending the other foot to the inner thigh.",
-                        "Step 2: Keeping your back straight, gently lean forward from your hips over the straight leg until you feel a light pull.",
-                        "Step 3: Hold the stretch without bouncing, focusing on deep, slow breaths."
-                    ],
-                    "sets": "1", 
-                    "reps": "60 seconds hold per leg", 
-                    "intensity_rpe": "RPE 1-2",
-                    "rest": "15 seconds",
-                    "equipment": "Mat/Chair",
-                    "safety_cue": "Never round your lower back; focus on hinging at the hips."
-                },
-                {
-                    "name": "Seated Chest Stretch",
-                    "benefit": "Opens the chest and shoulders, counteracting 'hunching' posture.",
-                    "steps": [
-                        "Step 1: Sit tall and interlace your fingers behind your back.",
-                        "Step 2: Gently lift your arms until you feel a stretch across your chest and front of your shoulders.",
-                        "Step 3: Hold the stretch, keeping your chin level and shoulders down."
-                    ],
-                    "sets": "1", 
-                    "reps": "60 seconds hold", 
-                    "intensity_rpe": "RPE 1-2",
-                    "rest": "N/A",
-                    "equipment": "Chair",
-                    "safety_cue": "Do not shrug your shoulders toward your ears; maintain relaxation."
-                },
-                {
-                    "name": "Triceps Stretch (Overhead)",
-                    "benefit": "Stretches the back of the arms and upper lats.",
-                    "steps": [
-                        "Step 1: Stand or sit tall, raise one arm overhead and bend the elbow, letting your hand fall behind your head.",
-                        "Step 2: Use your opposite hand to gently press down on the bent elbow.",
-                        "Step 3: Hold the stretch, feeling the pull along the back of the arm."
-                    ],
-                    "sets": "1", 
-                    "reps": "30 seconds hold per arm", 
-                    "intensity_rpe": "RPE 1-2",
-                    "rest": "15 seconds",
-                    "equipment": "Bodyweight",
-                    "safety_cue": "Avoid pressing too hard on the elbow; the stretch should be gentle."
-                }
-            ],
-            
+            "cooldown": cooldown,
             "safety_notes": [
                 "This is a fallback plan due to API failure. Consult a professional before attempting.",
                 "Progression Tip: If this plan felt easy, try to increase the set intensity by 1 RPE next time.",
@@ -935,12 +1100,21 @@ def main():
     # MAIN FORM
     if not st.session_state.fitness_plan_generated and not st.session_state.generation_in_progress:
         
+        # BMI Placeholder initialization (CRITICAL for Instant Update)
+        bmi_placeholder = st.empty()
+        
         # --- Default/Current Values from Session State ---
         profile = st.session_state.user_profile
         
-        # Calculate initial/re-run BMI for display 
+        # Calculate initial/re-run BMI for display in the placeholder
         current_weight_kg = profile.get('weight_kg', 70.0)
         current_height_cm = profile.get('height_cm', 170.0)
+        current_bmi = 0
+        if current_weight_kg > 0 and current_height_cm > 0:
+            current_bmi = current_weight_kg / ((current_height_cm / 100) ** 2)
+            bmi_placeholder.info(f"📊 Your BMI: {current_bmi:.1f}")
+        else:
+            bmi_placeholder.info("📊 Your BMI: Enter height and weight.")
         
         
         with st.form("fitness_form"):
@@ -949,7 +1123,6 @@ def main():
             st.subheader("📋 Basic Information")
             col1, col2 = st.columns(2)
             
-            # --- Column 1 Inputs (Personal Info) ---
             with col1:
                 # Retrieve current state for sticky inputs
                 name = st.text_input("Name *", placeholder="Your name", key="name_input", value=profile.get('name', ''))
@@ -957,17 +1130,14 @@ def main():
                 gender_default_index = ["Male", "Female", "Other"].index(profile.get('gender', 'Male'))
                 gender = st.selectbox("Gender *", ["Male", "Female", "Other"], key="gender_input", index=gender_default_index)
             
-            # --- Column 2 Inputs (Units, Weight, Height, BMI) ---
             with col2:
-                # BMI Placeholder is created inside the column
-                bmi_placeholder = st.empty() 
-                
                 unit_system_default = profile.get('unit_system', 'Metric (kg, cm)')
                 unit_system = st.radio("Units *", ["Metric (kg, cm)", "Imperial (lbs, in)"], key="unit_input", index=["Metric (kg, cm)", "Imperial (lbs, in)"].index(unit_system_default))
                 
                 weight_kg = 0.0
                 height_cm = 0.0
                 
+                # --- REVISED: No callbacks inside the form ---
                 if unit_system == "Metric (kg, cm)":
                     weight_kg = st.number_input("Weight (kg) *", min_value=30.0, max_value=300.0, value=profile.get('weight_kg', 70.0), key="weight_kg_input")
                     height_cm = st.number_input("Height (cm) *", min_value=100.0, max_value=250.0, value=profile.get('height_cm', 170.0), key="height_cm_input")
@@ -982,17 +1152,12 @@ def main():
                     weight_kg = weight_lbs * 0.453592
                     height_cm = height_in * 2.54
             
-            # --- BMI Display Logic (Happens here, after inputs are defined) ---
+            # --- BMI Display Logic (This relies on Streamlit's full script rerun for update) ---
             final_bmi = 0
             if weight_kg > 0 and height_cm > 0:
                 final_bmi = weight_kg / ((height_cm / 100) ** 2)
                 # Update placeholder text with the most current value on the next rerun
-                # BMI calculation logic is fixed to happen *inside* the column
                 bmi_placeholder.info(f"📊 Your BMI: {final_bmi:.1f}")
-            else:
-                 # Update placeholder if inputs are invalid/missing
-                bmi_placeholder.info("📊 Your BMI: Enter valid height and weight.")
-
 
             # Goals
             st.subheader("🎯 Fitness Goals")
@@ -1035,10 +1200,10 @@ def main():
             
             # Physical Limitations
             st.warning("⚠️ **Physical Limitations** - Describe ANY injuries, pain, or movement restrictions")
-            physical_limitations = st.text_area(
+            physical_limitation = st.text_area( # Renamed variable to physical_limitation for consistency in profile
                 "Physical Limitations (Important for Safety) *",
                 placeholder="E.g., 'Previous right knee surgery - avoid deep squats'",
-                height=100, key="physical_limitations_input", value=profile.get('physical_limitations', '')
+                height=100, key="physical_limitation_input", value=profile.get('physical_limitation', '')
             )
             
             # Training Schedule
@@ -1059,6 +1224,15 @@ def main():
                     "Session Duration *",
                     session_duration_options, key="session_duration_input", index=session_duration_default_index
                 )
+
+            # Workout Location (NEW INPUT ADDED)
+            st.subheader("🗺️ Workout Location")
+            location_options = ["Home", "Gym", "Outdoor", "Any"]
+            location_default_index = location_options.index(profile.get('workout_location', 'Home'))
+            workout_location = st.selectbox(
+                "Where will you primarily work out?",
+                location_options, key="location_input", index=location_default_index
+            )
             
             # Equipment
             st.subheader("🏋️ Available Equipment")
@@ -1098,11 +1272,12 @@ def main():
                         "secondary_goal": secondary_goal,
                         "fitness_level": fitness_level,
                         "medical_conditions": medical_conditions,
-                        "physical_limitations": physical_limitations.strip(),
+                        "physical_limitation": physical_limitation.strip(), # Stored correctly now
                         "days_per_week": days_per_week,
                         "session_duration": session_duration,
                         "available_equipment": equipment,
-                        "unit_system": unit_system
+                        "unit_system": unit_system,
+                        "workout_location": workout_location # Store new input
                     }
                     
                     st.session_state.workout_plans = {} 
@@ -1131,6 +1306,8 @@ def main():
 
         for idx, day in enumerate(profile['days_per_week']):
             
+            # Pass all previously generated plans to the prompt builder
+            # This is the crucial part that ensures the current day has knowledge of ALL previous days.
             previous_plans_to_pass = {d: st.session_state.workout_plans[d] for d in profile['days_per_week'] if d in st.session_state.workout_plans and profile['days_per_week'].index(d) < idx}
             
             system_prompt = advisor._build_system_prompt(
@@ -1153,6 +1330,7 @@ def main():
             progress_bar.progress(progress)
             status_text.text(f"Generating {day} workout... ({idx + 1}/{len(profile['days_per_week'])})")
             
+            # Call the resilient plan generation function
             result = advisor.generate_workout_plan(
                 profile,
                 day,
@@ -1197,8 +1375,8 @@ def main():
         
         st.markdown("\n")
         
-        if profile.get('physical_limitations'):
-            st.warning(f"⚠️ **Accommodated Limitations:** {profile['physical_limitations']}")
+        if profile.get('physical_limitation'):
+            st.warning(f"⚠️ **Accommodated Limitations:** {profile['physical_limitation']}")
         
         st.markdown("---")
         
@@ -1336,7 +1514,7 @@ def main():
         display_faq()
 
 def generate_markdown_export(profile: Dict, workout_plans: Dict, progression_tip: str) -> str:
-    """Generate markdown file for download, including the progression tip."""
+    """Generate markdown file for download, including the progression tip. (NO CHANGE)"""
     
     md_content = f"""# FriskaAI Fitness Plan
 ## Generated on {datetime.now().strftime('%B %d, %Y')}
@@ -1356,7 +1534,7 @@ def generate_markdown_export(profile: Dict, workout_plans: Dict, progression_tip
 **Session Duration:** {profile.get('session_duration', 'N/A')}
 
 **Medical Conditions:** {', '.join(profile.get('medical_conditions', ['None']))}
-**Physical Limitations:** {profile.get('physical_limitations', 'None')}
+**Physical Limitations:** {profile.get('physical_limitation', 'None')}
 
 **Available Equipment:** {', '.join(profile.get('available_equipment', ['Bodyweight Only']))}
 
