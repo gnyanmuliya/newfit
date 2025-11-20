@@ -1,4 +1,3 @@
-#test12
 import streamlit as st
 import requests
 from typing import Dict, List, Optional, Set, Any
@@ -123,6 +122,16 @@ FITNESS_LEVELS = {
     }
 }
 
+# NEW: Scaling for static holds (planks, core holds, static stretches) based on level
+STATIC_HOLD_SCALING = {
+    "Level 1 – Assisted / Low Function": "10-15 seconds",
+    "Level 2 – Beginner Functional": "15-25 seconds",
+    "Level 3 – Moderate / Independent": "25-45 seconds",
+    "Level 4 – Active Wellness": "45-60 seconds",
+    "Level 5 – Adaptive Advanced": "60-90 seconds", # Capped at 90s for safety guidance in the prompt
+}
+
+
 class FitnessAdvisor:
     """Enhanced fitness planning engine with proper API integration"""
     
@@ -220,7 +229,7 @@ class FitnessAdvisor:
         })
 
     def _determine_split_focus_and_repetition(self, total_days: int, day_index: int, fitness_level: str) -> tuple[str, str]:
-        """Determine the body part focus and the repetition rule for the current day based on new complex rules."""
+        """Determine the body part focus and the repetition rule for the current day based on new complex rules. (NO CHANGE)"""
         
         days_map = {0: "Day 1", 1: "Day 2", 2: "Day 3", 3: "Day 4", 4: "Day 5", 5: "Day 6", 6: "Day 7"}
         current_day_label = days_map.get(day_index, f"Day {day_index + 1}")
@@ -291,7 +300,7 @@ class FitnessAdvisor:
     def _determine_exercise_count(self, session_duration: str, fitness_level: str) -> str:
         """
         Determine the target number of main exercises based on duration, 
-        ADJUSTED for fitness level to manage joint stress and volume.
+        ADJUSTED for fitness level to manage joint stress and volume. (NO CHANGE)
         """
         duration_map = {
             "15-20 minutes": 17.5, 
@@ -424,8 +433,7 @@ class FitnessAdvisor:
 
     def _get_movement_pattern_from_exercise(self, exercise_name: str) -> str:
         """
-        Heuristic function to classify an exercise by movement pattern.
-        This helps the LLM avoid similar exercises across consecutive days.
+        Heuristic function to classify an exercise by movement pattern. (NO CHANGE)
         """
         name = exercise_name.lower()
         
@@ -481,7 +489,7 @@ class FitnessAdvisor:
     ) -> str:
         """
         Builds the entire system prompt based on the user's strict template,
-        incorporating all new demographic, split, location, and pattern avoidance rules.
+        incorporating all demographic, split, location, and new repetition/duration/hold rules.
         """
         
         # --- DYNAMIC VALUE EXTRACTION ---
@@ -503,6 +511,9 @@ class FitnessAdvisor:
         max_main_exercises = self._determine_exercise_count(user_profile.get("session_duration", "30-45 minutes"), fitness_level)
         total_days = len(user_profile.get("days_per_week", []))
         day_focus, repetition_rule = self._determine_split_focus_and_repetition(total_days, day_index, fitness_level) 
+        
+        # NEW: Level-based static hold duration
+        current_level_hold = STATIC_HOLD_SCALING.get(fitness_level, STATIC_HOLD_SCALING["Level 3 – Moderate / Independent"])
 
         # Rep Range Safety Adjustment (Gender/Age/BMI)
         target_reps = self.goal_programming_guidelines.get(primary_goal, {}).get('rep_range', '10-15')
@@ -525,7 +536,7 @@ class FitnessAdvisor:
                  # Example: 5-7 -> 5-6
                  target_rpe = f"{rpe_low}-{max(rpe_high - 1, rpe_low)}"
 
-        # --- REPETITION AVOIDANCE (ENHANCED LOGIC) ---
+        # --- REPETITION AVOIDANCE (ENHANCED LOGIC - NO CHANGE FROM PREVIOUS STEP) ---
         exercises_to_avoid = set()
         patterns_to_avoid = set()
         
@@ -644,9 +655,9 @@ class FitnessAdvisor:
                     {
                         "name": "string",
                         "benefit": "string",
-                        "steps": ["3-5 step strings"],
+                        "steps": ["3-5 sequential, descriptive step strings"], # FIX 2
                         "sets": "1",
-                        "duration": "string (e.g., 60 seconds)",
+                        "duration": "string (e.g., 60 seconds total, or 30 seconds per side)",
                         "intensity_rpe": "RPE 1-3",
                         "rest": "15 seconds",
                         "equipment": "string",
@@ -657,9 +668,9 @@ class FitnessAdvisor:
                     {
                         "name": "string",
                         "benefit": "string",
-                        "steps": ["3-5 step strings"],
+                        "steps": ["3-5 sequential, descriptive step strings"], # FIX 2
                         "sets": target_sets,
-                        "reps": target_reps,
+                        "reps": target_reps, # This MUST be in reps (e.g., 10-15) unless it's a timed cardio movement.
                         "intensity_rpe": f"RPE {target_rpe}",
                         "rest": target_rest_desc,
                         "equipment": "string",
@@ -670,7 +681,7 @@ class FitnessAdvisor:
                     {
                         "name": "string",
                         "benefit": "string",
-                        "steps": ["3-5 step strings"],
+                        "steps": ["3-5 sequential, descriptive step strings"], # FIX 2
                         "sets": "1",
                         "hold": "string (e.g., 30-60 seconds / side)",
                         "intensity_rpe": "RPE 1-3",
@@ -700,11 +711,13 @@ class FitnessAdvisor:
             f"- Warmup: exactly 3 exercises (Total duration MUST be 5-7 minutes, FIX 4)",
             f"- Main workout: exactly {max_main_exercises} exercises (Volume reduced for safety/level). **All main exercises must be unique from each other and the warm-up/cool-down.**", # ENFORCING UNIQUENESS
             f"- Cooldown: exactly 3 exercises",
-            f"- Steps: always 3–5 clear, sequential steps for every exercise.",
+            f"- Steps: always 3–5 **sequential, descriptive, and ACCURATE** steps for every exercise. **DO NOT HALLUCINATE** the steps.", # FIX 2
             f"- **Movement Balance Mandate (FIX 2 & 6):** {required_structure}",
             "",
             "# 5. SAFETY & GOAL MANDATES",
             f"- Intensity: Main workout RPE must be **{target_rpe}** | Warmup/Cooldown RPE must be **RPE 1-3**.",
+            f"- **REPS vs DURATION RULE (FIX 1):** Main workout exercises MUST be in **Reps: {target_reps}** (e.g., 10-15) unless the exercise is a continuous cardiovascular activity.",
+            f"- **STATIC HOLD SCALING (FIX 3):** All static holds (planks, stretches, stability drills) MUST use a hold time appropriate for the user's level, which is a maximum of **{current_level_hold}** total duration. For exercises requiring two sides (e.g., side plank, stretches), split the duration evenly.",
             f"- Reps/Sets: Main workout sets/reps must be **Sets: {target_sets}, Reps: {target_reps}**.",
             "- Never exceed user equipment.",
             "- Never use high-impact or unsafe movements (see restrictions in #3).",
