@@ -8,7 +8,9 @@ import json
 import numpy as np
 import time
 import os # Import os for path handling
-# Load environment variables immediately
+from dotenv import load_dotenv # New import
+
+load_dotenv() # Load environment variables immediately
 
 # ============ CONFIGURATION ============
 # NOTE: The API key and Endpoint URL are set for an Azure Mistral deployment.
@@ -70,7 +72,45 @@ FALLBACK_MEDICAL_CONDITIONS_DATA = {
 
 
 # ============ LOAD EXCEL CONDITION DATABASE ============
+@st.cache_data
+def load_condition_database():
+    """
+    Load condition database from Excel file. Uses fallback data if the file is not found,
+    ensuring the medical condition list remains populated.
+    """
+    condition_db = {}
+    
+    try:
+        # Changed hardcoded path to relative/standard filename for better deployment/local consistency
+        df = pd.read_excel(EXCEL_FILENAME) 
+        
+        if 'Condition' in df.columns:
+            for _, row in df.iterrows():
+                condition_name = row['Condition']
+                if pd.isna(condition_name) or str(condition_name).lower() == "none":
+                    continue
+                    
+                condition_db[condition_name] = {
+                    'medications': row.get('Medication(s)', np.nan),
+                    'direct_impact': row.get('Direct Exercise Impact', np.nan),
+                    'indirect_impact': row.get('Indirect Exercise Impacts', np.nan),
+                    'contraindicated': row.get('Contraindicated Exercises', np.nan),
+                    'modified_safer': row.get('Modified / Safer Exercises', np.nan)
+                }
+                # Replace NaN with empty string for clean output in prompt
+                for key in condition_db[condition_name]:
+                    if pd.isna(condition_db[condition_name][key]):
+                        condition_db[condition_name][key] = ""
+    
+    except (FileNotFoundError, Exception) as e:
+        # If file not found or another error, print error and load fallback
+        st.error(f"Error loading {EXCEL_FILENAME}: {e}. Using robust hardcoded fallback data.")
+        condition_db = FALLBACK_MEDICAL_CONDITIONS_DATA
 
+    return condition_db
+
+# Load condition database
+CONDITION_DATABASE = load_condition_database()
 
 # ============ MEDICAL CONDITIONS LIST (Dynamically Generated) ============
 # List for the UI multiselect: includes 'None' plus all conditions from the loaded Excel data OR fallback data.
