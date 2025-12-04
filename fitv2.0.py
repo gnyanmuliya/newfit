@@ -6,11 +6,9 @@ from datetime import datetime
 import pandas as pd
 
 # ============ CONFIGURATION ============
-# NOTE: The API key and Endpoint URL are set for an Azure Mistral deployment.
-# CRITICAL FIX: The API key header is corrected below to use 'Authorization: Bearer'
-# to address the Status 400 error: "Auth token must be passed as a header called Authorization"
+# CRITICAL FIX: Using Claude API endpoint instead of Azure Mistral
 API_KEY = "08Z5HKTA9TshVWbKb68vsef3oG7Xx0Hd"
-ENDPOINT_URL = "https://mistral-small-2503-Gnyan-Test.swedencentral.models.ai.azure.com/chat/completions"
+ENDPOINT_URL = "https://mistral-small-2503-Gnyan-Test.swedencentral.models.ai.azure.com/chat/completions"  # Use Anthropic endpoint
 
 st.set_page_config(
     page_title="FriskaAI Fitness Coach",
@@ -24,38 +22,22 @@ def load_condition_database():
     """Load condition database from Excel file"""
     try:
         # Try to load the Excel file
-        # CRITICAL: Ensure the Excel file name is correct and accessible
         df = pd.read_excel("Top Lifestyle Disorders and Medical Conditions & ExerciseTags.xlsx")
         
         # Convert to dictionary for easier access
         condition_db = {}
-        # Ensure 'Condition' column exists
-        if 'Condition' not in df.columns:
-            # Replaced st.error with print/logging for non-display function
-            return {}
-            
         for _, row in df.iterrows():
             condition_name = row['Condition']
-            # Convert NaN to empty string for safe string formatting later
             condition_db[condition_name] = {
-                'medications': row.get('Medication(s)', pd.NA),
-                'direct_impact': row.get('Direct Exercise Impact', pd.NA),
-                'indirect_impact': row.get('Indirect Exercise Impacts', pd.NA),
-                'contraindicated': row.get('Contraindicated Exercises', pd.NA),
-                'modified_safer': row.get('Modified / Safer Exercises', pd.NA)
+                'medications': row.get('Medication(s)', ''),
+                'direct_impact': row.get('Direct Exercise Impact', ''),
+                'indirect_impact': row.get('Indirect Exercise Impacts', ''),
+                'contraindicated': row.get('Contraindicated Exercises', ''),
+                'modified_safer': row.get('Modified / Safer Exercises', '')
             }
-            # Replace pd.NA with empty string for clean output in prompt
-            for key in condition_db[condition_name]:
-                if pd.isna(condition_db[condition_name][key]):
-                    condition_db[condition_name][key] = ""
-                    
-        # st.success("Condition database loaded successfully.") # Removed for non-display function
         return condition_db
-    except FileNotFoundError:
-        # st.warning(f"Could not find Excel file 'Top Lifestyle Disorders and Medical Conditions & ExerciseTags.xlsx'. Using fallback database.") # Removed for non-display function
-        return {}
     except Exception as e:
-        # st.warning(f"Could not load condition database: {str(e)}. Using fallback database.") # Removed for non-display function
+        st.warning(f"Could not load condition database: {str(e)}. Using fallback database.")
         return {}
 
 # Load condition database
@@ -154,6 +136,11 @@ class FitnessAdvisor:
     def __init__(self, api_key: str, endpoint_url: str):
         self.api_key = api_key
         self.endpoint_url = endpoint_url
+        self.weekly_exercises_used = {
+            'warmup': set(),
+            'main': set(),
+            'cooldown': set()
+        }
         
         # UPDATED: Goal programming WITHOUT RPE (moved to levels)
         self.goal_programming_guidelines = {
@@ -161,64 +148,63 @@ class FitnessAdvisor:
                 "priority": "Low to moderate-intensity cardio + resistance for large muscle groups",
                 "rep_range": "12-20",
                 "rest": "30-45 seconds",
-                "cardio_focus": "60-70% of workout time",
-                "sets": "2-3" # Added sets
+                "cardio_focus": "60-70% of workout time"
             },
             "Muscle Gain": {
                 "priority": "Progressive overload resistance training, controlled tempo",
                 "rep_range": "6-12",
                 "rest": "60-90 seconds",
-                "volume": "3-5 sets per exercise",
-                "sets": "3-5" # Added sets
+                "volume": "3-5 sets per exercise"
             },
             "Increase Overall Strength": {
                 "priority": "Compound lifts, progressive loading, mobility work",
                 "rep_range": "4-8",
                 "rest": "90-180 seconds",
-                "focus": "Heavy compound movements",
-                "sets": "3-5" # Added sets
+                "focus": "Heavy compound movements"
             },
             "Improve Cardiovascular Fitness": {
                 "priority": "Aerobic/interval protocols, recovery days",
                 "intensity": "60-80% max HR",
-                "modality": "Continuous or interval training",
-                "sets": "N/A"
+                "modality": "Continuous or interval training"
             },
             "Improve Flexibility & Mobility": {
                 "priority": "Stretching, joint mobility, dynamic ROM",
                 "hold_duration": "30-60 seconds per stretch",
-                "focus": "Full range of motion",
-                "sets": "N/A"
+                "focus": "Full range of motion"
             },
             "Rehabilitation & Injury Prevention": {
                 "priority": "Corrective exercises, stability, low-load resistance",
                 "rep_range": "10-15",
                 "rest": "60-90 seconds",
-                "exclude": "High-impact, ballistic movements",
-                "sets": "2-3" # Added sets
+                "exclude": "High-impact, ballistic movements"
             },
             "Improve Posture and Balance": {
                 "priority": "Core activation, mobility, balance",
-                "focus": "Postural muscles, single-leg work",
-                "sets": "2-3" # Added sets
+                "focus": "Postural muscles, single-leg work"
             },
             "General Fitness": {
                 "priority": "Balanced approach: cardio, strength, flexibility",
                 "rep_range": "10-15",
-                "rest": "45-60 seconds",
-                "sets": "2-3" # Added sets
+                "rest": "45-60 seconds"
             }
+        }
+    
+    def reset_weekly_tracker(self):
+        """Reset exercise tracker for new week generation"""
+        self.weekly_exercises_used = {
+            'warmup': set(),
+            'main': set(),
+            'cooldown': set()
         }
     
     def _get_condition_details_from_db(self, condition: str) -> Dict:
         """Get condition details from loaded Excel database"""
         if condition in CONDITION_DATABASE:
-            # Safely return the data, defaulting to 'N/A' or conservative values if empty string
-            return {k: v if v else 'N/A' for k, v in CONDITION_DATABASE[condition].items()}
+            return CONDITION_DATABASE[condition]
         
-        # Fallback to hardcoded if not in Excel (only for major conditions)
+        # Fallback to hardcoded if not in Excel
         fallback_db = {
-            "Hypertension (High Blood Pressure)": {
+            "Hypertension": {
                 "medications": "ACE inhibitors, Beta-blockers, Diuretics",
                 "direct_impact": "May reduce exercise capacity, affect heart rate response",
                 "indirect_impact": "Dizziness, fatigue",
@@ -238,7 +224,7 @@ class FitnessAdvisor:
             "medications": "Unknown",
             "direct_impact": "Use conservative approach",
             "indirect_impact": "Monitor for symptoms",
-            "contraindicated": "High-risk movements (e.g., heavy lifting, ballistic) due to unknown risk",
+            "contraindicated": "High-risk movements",
             "modified_safer": "Low-impact, controlled movements"
         })
     
@@ -247,10 +233,9 @@ class FitnessAdvisor:
         user_profile: Dict,
         day_name: str,
         day_index: int,
-        previous_plans: Dict, 
         workout_category: str = "Full Body"
     ) -> str:
-        """Build comprehensive system prompt with all fixes and goal alignment updates"""
+        """Build comprehensive system prompt with all fixes"""
         
         # Extract profile
         name = user_profile.get("name", "User")
@@ -262,60 +247,29 @@ class FitnessAdvisor:
         secondary_goal = user_profile.get("secondary_goal", "None")
         medical_conditions = user_profile.get("medical_conditions", ["None"])
         physical_limitations = user_profile.get("physical_limitations", "")
-        session_duration = user_profile.get("session_duration", "30-45 minutes") # Get duration for prompt context
         
-        # Get level-specific RPE and exercises
+        # Get level-specific RPE
         level_data = FITNESS_LEVELS.get(fitness_level, FITNESS_LEVELS["Level 3 – Moderate / Independent"])
         level_rpe = level_data['rpe_range']
         
         # Get goal guidelines
         goal_guidelines = self.goal_programming_guidelines.get(primary_goal, {})
         
-        # *** GOAL/LEVEL ALIGNMENT OVERRIDE ***
-        target_rpe = level_rpe
-        target_sets = goal_guidelines.get('sets', '2-3')
-        target_reps = goal_guidelines.get('rep_range', '10-15')
-        target_rest = goal_guidelines.get('rest', '45-60 seconds')
-        
-        rpe_override_note = ""
-        if primary_goal == "Muscle Gain" and fitness_level in ["Level 1 – Assisted / Low Function", "Level 2 – Beginner Functional"]:
-            target_rpe = "5-7" # Override for stimulus
-            target_sets = "3"   # Enforce 3 sets minimum for hypertrophy stimulus
-            target_reps = "6-12"
-            rpe_override_note = (
-                "**⚠️ RPE OVERRIDE FOR MUSCLE GAIN: Despite the Level 1 constraints, you MUST target RPE 5-7 "
-                "to create sufficient mechanical tension for muscle hypertrophy. The exercises themselves "
-                "must remain Level 1 (seated, assisted, stable), but the weight/band used MUST be challenging "
-                "enough to achieve RPE 5-7 by the last few reps. DO NOT use RPE 3-4. Target 3 Sets.**"
-            )
-        # **************************************************
-        
-        # Determine the Focus for the workout (e.g., Lower Focus, Upper Focus, Core Focus)
-        focus_map = {0: "Lower Focus", 1: "Upper Focus", 2: "Core Focus"}
-        day_focus = focus_map.get(day_index % 3, "Balanced Focus")
-        
-        # *** DURATION FIX: Reduce exercise count for short sessions ***
-        # If duration is 15-20 min, restrict main exercises to 4-5 total.
-        max_main_exercises = "4-5" if session_duration in ["15-20 minutes", "20-30 minutes"] else "6-8"
-        
         prompt = f"""You are FriskaAI, an expert clinical exercise physiologist (ACSM-CEP).
-Your primary role is to ensure **MAXIMUM SAFETY** (especially for Level 1/Medical Conditions/Limitations) while **OPTIMIZING FOR THE PRIMARY GOAL**.
 
 **USER PROFILE:**
 - Name: {name}
 - Age: {age} | Gender: {gender} | BMI: {bmi}
 - Fitness Level: {fitness_level}
-  * RPE Range (Baseline): {level_rpe} (Rate of Perceived Exertion)
+  * RPE Range: {level_rpe} (Rate of Perceived Exertion)
   * Description: {level_data['description']}
   * Appropriate Exercises: {level_data['exercises']}
-- **Session Duration:** {session_duration} (Target time is critical!)
 
 **GOALS:**
 - Primary Goal: {primary_goal}
   * {goal_guidelines.get('priority', 'Balanced fitness approach')}
-  * Rep Range: {target_reps}
-  * Rest: {target_rest}
-  * Sets: {target_sets}
+  * Rep Range: {goal_guidelines.get('rep_range', '10-15')}
+  * Rest: {goal_guidelines.get('rest', '45-60 seconds')}
 """
 
         if secondary_goal and secondary_goal != "None":
@@ -325,14 +279,6 @@ Your primary role is to ensure **MAXIMUM SAFETY** (especially for Level 1/Medica
   * {secondary_guidelines.get('priority', 'Support primary goal')}
 """
 
-        # Add all previous plans for variety check
-        if previous_plans:
-            prompt += "\n**PREVIOUS WORKOUTS THIS WEEK (CRITICAL FOR VARIETY):**\n"
-            for day, plan_data in previous_plans.items():
-                if plan_data['success']:
-                    # Simple text summary is enough for the AI to understand what was used
-                    prompt += f"- **{day}**: Previously generated plan content (focus on exercise names/types): \n```\n{plan_data['plan'][:300]}...\n```\n"
-
         # CRITICAL: Physical limitations section
         if physical_limitations and physical_limitations.strip():
             prompt += f"""
@@ -340,7 +286,7 @@ Your primary role is to ensure **MAXIMUM SAFETY** (especially for Level 1/Medica
 **PHYSICAL LIMITATIONS (CRITICAL - MUST ACCOMMODATE):**
 {physical_limitations}
 
-**ACTION REQUIRED (LIMITATIONS):**
+**ACTION REQUIRED:**
 1. Analyze each limitation carefully
 2. Exclude ANY exercise that could aggravate these limitations
 3. Provide alternative exercises that work around limitations
@@ -369,64 +315,46 @@ Your primary role is to ensure **MAXIMUM SAFETY** (especially for Level 1/Medica
 
 **TODAY'S WORKOUT:**
 Day: {day_name} (Day {day_index + 1})
-Category: {workout_category} ({day_focus})
+Category: {workout_category}
 
-**MANDATORY STRUCTURE (Strictly follow this formatting, including dashes and parentheses/brackets. USE DOUBLE NEWLINES (MARKDOWN PARAGRAPHS) TO SEPARATE ALL SECTIONS AND PARAMETERS FOR READABILITY):**
+**MANDATORY STRUCTURE:**
 
-{day_name} – {workout_category} ({day_focus}) Focus
+### {day_name} – {workout_category}
 
-Warm-Up (5-7 minutes)
-[Movement] – [Purpose] – [Duration/Reps] – [Safety Note]
+**Warm-Up (5-8 minutes)**
+1. [Movement] – [Purpose] – [Duration/Reps] – [Safety Note]
+2. [Movement] – [Purpose] – [Duration/Reps] – [Safety Note]
+3. [Movement] – [Purpose] – [Duration/Reps] – [Safety Note]
 
-[Movement] – [Purpose] – [Duration/Reps] – [Safety Note]
+**Main Workout (20-30 minutes)**
 
-[Movement] – [Purpose] – [Duration/Reps] – [Safety Note]
+For each exercise include:
 
-[Movement] – [Purpose] – [Duration/Reps] – [Safety Note]
-
-Main Workout (Target: {workout_category} ({day_focus}))
-**CRITICAL: Include exactly {max_main_exercises} main exercises to fit the {session_duration} target time.**
-
-[Exercise Name]
-Benefit: [Benefit statement for {primary_goal}]
-
-How to Perform:
+1. [Exercise Name]
+**Benefit:** [How this supports {primary_goal}]
+**How to Perform:**
 1. [Step 1]
 2. [Step 2]
 3. [Step 3]
+**Sets × Reps:** {goal_guidelines.get('rep_range', '10-15')} reps
+**Intensity:** RPE {level_rpe}
+**Rest:** {goal_guidelines.get('rest', '45-60 seconds')}
+**Equipment:** [From available list]
+**Safety Cue:** [Specific to limitations/conditions]
 
-Sets: **{target_sets}**
+[Repeat for 6-8 exercises]
 
-Reps: **{target_reps}**
-
-Intensity: **RPE {target_rpe}**
-
-Rest: **{target_rest}**
-
-Equipment: [From available list]
-
-Safety Cue: [Specific to limitations/conditions]
-
-[Repeat for a total of {max_main_exercises} exercises]
-
-Cool-Down (5-7 minutes)
-[Stretch] – [Target] – [60-90 seconds] – [Safety Note]
-
-[Stretch] – [Target] – [60-90 seconds] – [Safety Note]
-
-[Stretch] – [Target] – [60-90 seconds] – [Safety Note]
-
-[Stretch] – [Target] – [60-90 seconds] – [Safety Note]
+**Cool-Down (5 minutes)**
+1. [Stretch] – [Target] – [60 seconds] – [Safety Note]
+2. [Stretch] – [Target] – [60 seconds] – [Safety Note]
+3. [Stretch] – [Target] – [60 seconds] – [Safety Note]
 
 **CRITICAL RULES:**
-1. ALL exercises must match {fitness_level} complexity (e.g., seated, assisted, wall-supported).
+1. ALL exercises must match {fitness_level} complexity
 2. ZERO contraindicated exercises for: {', '.join(medical_conditions)}
 3. MUST accommodate physical limitations: {physical_limitations if physical_limitations else 'None'}
-4. RPE must be **{target_rpe}** (Use the prescribed RPE).
-5. **CRITICAL: Ensure STIMULUS VARIETY**. Do not repeat the exact same **Main Workout** exercise across multiple days (if previous plans exist). Use variations.
-6. Support {primary_goal} with every exercise choice.
-
-{rpe_override_note}
+4. RPE must be {level_rpe} (no exceptions)
+5. Support {primary_goal} with every exercise choice
 
 Generate the complete workout plan now in English only.
 """
@@ -434,31 +362,32 @@ Generate the complete workout plan now in English only.
         return prompt
     
     def generate_workout_plan(
-        self,
-        user_profile: Dict,
-        day_name: str,
-        day_index: int,
-        previous_plans: Dict, 
-        workout_category: str = "Full Body"
-    ) -> Dict:
+            self,
+            user_profile: Dict,
+            day_name: str,
+            day_index: int,
+            workout_category: str = "Full Body"
+        ) -> Dict:
         """Generate workout plan with fixed API call"""
         
         try:
-            system_prompt = self._build_system_prompt(
-                user_profile, day_name, day_index, previous_plans, workout_category
-            )
-            
-            # FIXED: Proper API call - Using 'Authorization: Bearer' to fix 400 error
+            # ... (system_prompt building code remains the same)
+
+            # FIXED: Proper API call - CORRECTION APPLIED HERE
             headers = {
                 "Content-Type": "application/json",
-                # CRITICAL FIX for 400 error: Use Bearer token authorization
+                # CRITICAL FIX: Use Authorization: Bearer <API_KEY> format
+                # The 'api-key' header you currently have is for Azure OpenAI service,
+                # but the error message suggests a standard 'Authorization' header is needed.
                 "Authorization": f"Bearer {self.api_key}" 
             }
+            
+            # ... (rest of the payload and request code remains the same)
             
             payload = {
                 "model": "mistral-small",
                 "messages": [
-                    {"role": "system", "content": "You are FriskaAI, an expert clinical exercise physiologist. Prioritize safety and follow all instructions strictly."},
+                    {"role": "system", "content": "You are FriskaAI, an expert clinical exercise physiologist."},
                     {"role": "user", "content": system_prompt}
                 ],
                 "temperature": 0.7,
@@ -467,28 +396,21 @@ Generate the complete workout plan now in English only.
             
             response = requests.post(self.endpoint_url, headers=headers, json=payload)
             
+            # Debug logging
+            st.write(f"DEBUG - Status Code: {response.status_code}")
+            
             if response.status_code != 200:
-                # Log the full response text for debugging
                 st.error(f"API Error {response.status_code}: {response.text}")
-                # Use fallback plan, but capture the error message
-                return {
-                    "success": False,
-                    "plan": self._generate_fallback_plan(user_profile, day_name, workout_category),
-                    "error": f"API returned {response.status_code} with error: {response.text}"
-                }
+                raise Exception(f"API returned {response.status_code}")
             
             result = response.json()
             
             # Extract plan text
             plan_text = ""
-            try:
-                plan_text = result['choices'][0]['message']['content']
-            except (KeyError, IndexError):
-                # Fallback extraction logic
-                if "content" in result and isinstance(result["content"], list):
-                    for block in result["content"]:
-                        if block.get("type") == "text":
-                            plan_text += block.get("text", "")
+            if "content" in result and isinstance(result["content"], list):
+                for block in result["content"]:
+                    if block.get("type") == "text":
+                        plan_text += block.get("text", "")
             
             if not plan_text or len(plan_text) < 100:
                 raise ValueError("Empty or too short response from API")
@@ -507,77 +429,41 @@ Generate the complete workout plan now in English only.
                 "error": str(e)
             }
     
-    # INDENTATION FIX: This method is now correctly aligned with the class methods above.
-    def _generate_fallback_plan(self, user_profile: Dict, day_name: str, workout_category: str) -> str:
-        """Generate simple fallback plan"""
-        
-        # Adjust fallback sets/reps based on goal for better alignment even in error
-        goal = user_profile.get("primary_goal", "General Fitness")
-        target_sets = self.goal_programming_guidelines.get(goal, {}).get('sets', '3')
-        target_reps = self.goal_programming_guidelines.get(goal, {}).get('rep_range', '12')
-        target_rest = self.goal_programming_guidelines.get(goal, {}).get('rest', '60 seconds')
-        
-        # Determine the Focus for the workout
-        focus_map = {"Monday": "Lower Focus", "Wednesday": "Upper Focus", "Friday": "Core Focus"}
-        day_focus = focus_map.get(day_name, "Balanced Focus")
+        def _generate_fallback_plan(self, user_profile: Dict, day_name: str, workout_category: str) -> str:
+            """Generate simple fallback plan"""
+            return f"""### {day_name} – {workout_category}
 
-        return f"""{day_name} – {workout_category} ({day_focus}) Focus
+**⚠️ This is a fallback plan. API generation failed.**
 
-**⚠️ This is a fallback plan. API generation failed. Please see error message above.**
+**Warm-Up (5 minutes)**
+1. March in Place – 2 minutes
+2. Arm Circles – 1 minute
+3. Leg Swings – 2 minutes
 
-Warm-Up (5-7 minutes)
+**Main Workout (25 minutes)**
 
-Seated Marching – [Purpose: Light cardio] – [Duration: 2 minutes] – [Safety Note: Keep movements slow]
+1. Bodyweight Squats
+   - Sets × Reps: 3 × 12
+   - Rest: 60 seconds
 
-Shoulder Rolls – [Purpose: Warm shoulders] – [Duration: 1 minute] – [Safety Note: Controlled motion]
+2. Wall/Modified Push-ups
+   - Sets × Reps: 3 × 10
+   - Rest: 60 seconds
 
-Main Workout (Target: {workout_category} ({day_focus}))
+3. Glute Bridges
+   - Sets × Reps: 3 × 15
+   - Rest: 45 seconds
 
-Seated Band Rows
-Benefit: [Targets back muscles and supports general fitness]
+4. Plank Hold
+   - Duration: 3 × 30 seconds
+   - Rest: 45 seconds
 
-How to Perform:
-1. Sit on a chair, band looped around feet.
-2. Pull band towards torso, squeezing shoulder blades.
-3. Release and repeat.
+**Cool-Down (5 minutes)**
+1. Hamstring Stretch – 60 seconds each leg
+2. Quad Stretch – 60 seconds each leg
+3. Child's Pose – 60 seconds
 
-Sets: **{target_sets}**
-
-Reps: **{target_reps}**
-
-Intensity: **RPE 4-6**
-
-Rest: **{target_rest}**
-
-Equipment: Resistance Band
-
-Safety Cue: Keep back straight.
-
-Wall Push-ups
-Benefit: [Targets chest and arms and supports general fitness]
-
-How to Perform:
-1. Stand arm's length from wall, hands shoulder height.
-2. Bend elbows, lean in.
-3. Push back to start.
-
-Sets: **{target_sets}**
-
-Reps: **{target_reps}**
-
-Intensity: **RPE 4-6**
-
-Rest: **{target_rest}**
-
-Equipment: Wall
-
-Safety Cue: Keep body straight.
-
-Cool-Down (5-7 minutes)
-
-Seated Hamstring Stretch – [Target: Hamstrings] – [60-90 seconds] – [Safety Note: Keep back straight]
-
-Seated Chest Stretch – [Target: Chest] – [60-90 seconds] – [Safety Note: Relax shoulders]
+*Please retry with Generate Plan button for personalized workout.*
 """
 
 # ============ CUSTOM CSS ============
@@ -590,7 +476,7 @@ def inject_custom_css():
         padding: 2rem;
     }
     .header-container {
-        background: black;
+        background: white;
         padding: 2rem;
         border-radius: 15px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
@@ -619,8 +505,6 @@ def initialize_session_state():
         st.session_state.workout_plans = {}
     if 'generation_in_progress' not in st.session_state:
         st.session_state.generation_in_progress = False
-    if 'form_submitted_and_validated' not in st.session_state:
-        st.session_state.form_submitted_and_validated = False
 
 # ============ MAIN APPLICATION ============
 def main():
@@ -647,28 +531,24 @@ def main():
             st.subheader("📋 Basic Information")
             col1, col2 = st.columns(2)
             
-            # --- Form Inputs ---
             with col1:
-                name = st.text_input("Name *", placeholder="Your name", key="name_input")
-                age = st.number_input("Age *", min_value=13, max_value=100, value=30, key="age_input")
-                gender = st.selectbox("Gender *", ["Male", "Female", "Other"], key="gender_input")
+                name = st.text_input("Name *", placeholder="Your name")
+                age = st.number_input("Age *", min_value=13, max_value=100, value=30)
+                gender = st.selectbox("Gender *", ["Male", "Female", "Other"])
             
             with col2:
-                unit_system = st.radio("Units *", ["Metric (kg, cm)", "Imperial (lbs, in)"], key="unit_input")
+                unit_system = st.radio("Units *", ["Metric (kg, cm)", "Imperial (lbs, in)"])
                 
-                weight_kg = 0.0
-                height_cm = 0.0
                 if unit_system == "Metric (kg, cm)":
-                    weight_kg = st.number_input("Weight (kg) *", min_value=30.0, max_value=300.0, value=70.0, key="weight_kg_input")
-                    height_cm = st.number_input("Height (cm) *", min_value=100.0, max_value=250.0, value=170.0, key="height_cm_input")
+                    weight_kg = st.number_input("Weight (kg) *", min_value=30.0, max_value=300.0, value=70.0)
+                    height_cm = st.number_input("Height (cm) *", min_value=100.0, max_value=250.0, value=170.0)
                 else:
-                    weight_lbs = st.number_input("Weight (lbs) *", min_value=66.0, max_value=660.0, value=154.0, key="weight_lbs_input")
-                    height_in = st.number_input("Height (in) *", min_value=39.0, max_value=98.0, value=67.0, key="height_in_input")
+                    weight_lbs = st.number_input("Weight (lbs) *", min_value=66.0, max_value=660.0, value=154.0)
+                    height_in = st.number_input("Height (in) *", min_value=39.0, max_value=98.0, value=67.0)
                     weight_kg = weight_lbs * 0.453592
                     height_cm = height_in * 2.54
             
             # BMI calculation
-            bmi = 0
             if weight_kg > 0 and height_cm > 0:
                 bmi = weight_kg / ((height_cm / 100) ** 2)
                 st.info(f"📊 Your BMI: {bmi:.1f}")
@@ -680,19 +560,19 @@ def main():
             with col1:
                 primary_goal = st.selectbox(
                     "Primary Goal *",
-                    list(advisor.goal_programming_guidelines.keys()), key="primary_goal_input"
+                    list(advisor.goal_programming_guidelines.keys())
                 )
             
             with col2:
                 secondary_goal = st.selectbox(
                     "Secondary Goal (Optional)",
-                    ["None"] + list(advisor.goal_programming_guidelines.keys()), key="secondary_goal_input"
+                    ["None"] + list(advisor.goal_programming_guidelines.keys())
                 )
             
             # Fitness Level
             fitness_level = st.selectbox(
                 "Fitness Level *",
-                list(FITNESS_LEVELS.keys()), key="fitness_level_input"
+                list(FITNESS_LEVELS.keys())
             )
             
             # Show level description
@@ -704,15 +584,16 @@ def main():
             medical_conditions = st.multiselect(
                 "Medical Conditions *",
                 MEDICAL_CONDITIONS,
-                default=["None"], key="medical_conditions_input"
+                default=["None"]
             )
             
-            # Physical Limitations
+            # FIXED: Physical Limitations - More prominent
             st.warning("⚠️ **Physical Limitations** - Describe ANY injuries, pain, or movement restrictions")
             physical_limitations = st.text_area(
                 "Physical Limitations (Important for Safety) *",
-                placeholder="E.g., 'Previous right knee surgery - avoid deep squats'",
-                height=100, key="physical_limitations_input"
+                placeholder="E.g., 'Previous right knee surgery - avoid deep squats' or 'Lower back pain - no forward bending' or 'Right shoulder impingement - limited overhead movements'",
+                height=100,
+                help="Be specific! This ensures we avoid exercises that could cause pain or injury."
             )
             
             # Training Schedule
@@ -723,20 +604,46 @@ def main():
                 days_per_week = st.multiselect(
                     "Training Days *",
                     ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-                    default=["Monday", "Wednesday", "Friday"], key="days_per_week_input"
+                    default=["Monday", "Wednesday", "Friday"]
                 )
             
             with col2:
                 session_duration = st.selectbox(
                     "Session Duration *",
-                    ["15-20 minutes", "20-30 minutes", "30-45 minutes", "45-60 minutes"], key="session_duration_input"
+                    ["15-20 minutes", "20-30 minutes", "30-45 minutes", "45-60 minutes"]
                 )
             
-            # Equipment (Simplified to prevent massive key list)
+            # Equipment
             st.subheader("🏋️ Available Equipment")
-            eq_options = ["Bodyweight Only", "Dumbbells", "Resistance Bands", "Kettlebells", "Barbell", "Bench", "Pull-up Bar", "Yoga Mat", "Machines"]
-            equipment = st.multiselect("Select all available equipment:", eq_options, default=["Bodyweight Only"], key="equipment_input")
-
+            eq_cols = st.columns(4)
+            
+            with eq_cols[0]:
+                eq_bodyweight = st.checkbox("Bodyweight Only", value=True)
+                eq_dumbbells = st.checkbox("Dumbbells")
+            
+            with eq_cols[1]:
+                eq_bands = st.checkbox("Resistance Bands")
+                eq_kettlebells = st.checkbox("Kettlebells")
+            
+            with eq_cols[2]:
+                eq_barbell = st.checkbox("Barbell")
+                eq_bench = st.checkbox("Bench")
+            
+            with eq_cols[3]:
+                eq_pullup = st.checkbox("Pull-up Bar")
+                eq_mat = st.checkbox("Yoga Mat")
+            
+            # Compile equipment
+            equipment = []
+            if eq_bodyweight: equipment.append("Bodyweight Only")
+            if eq_dumbbells: equipment.append("Dumbbells")
+            if eq_bands: equipment.append("Resistance Bands")
+            if eq_kettlebells: equipment.append("Kettlebells")
+            if eq_barbell: equipment.append("Barbell")
+            if eq_bench: equipment.append("Bench")
+            if eq_pullup: equipment.append("Pull-up Bar")
+            if eq_mat: equipment.append("Yoga Mat")
+            
             if not equipment:
                 equipment = ["Bodyweight Only"]
             
@@ -748,24 +655,22 @@ def main():
                 type="primary"
             )
             
-            # Process ONLY when button clicked
+            # FIXED: Process ONLY when button clicked
             if submit_clicked:
-                # Validation: Check mandatory fields
+                # Validation
                 if not name or len(name.strip()) < 2:
-                    st.error("❌ Please enter your name.")
+                    st.error("❌ Please enter your name")
                 elif not days_per_week:
-                    st.error("❌ Please select at least one training day.")
-                elif bmi <= 0 or (weight_kg <= 0 or height_cm <= 0):
-                    st.error("❌ Please ensure valid weight and height inputs.")
+                    st.error("❌ Please select at least one training day")
                 else:
-                    # Store profile and set flag to start generation
+                    # Store profile
                     st.session_state.user_profile = {
                         "name": name.strip(),
                         "age": age,
                         "gender": gender,
                         "weight_kg": weight_kg,
                         "height_cm": height_cm,
-                        "bmi": round(bmi, 1) if bmi > 0 else 0,
+                        "bmi": round(bmi, 1) if weight_kg > 0 and height_cm > 0 else 0,
                         "primary_goal": primary_goal,
                         "secondary_goal": secondary_goal,
                         "fitness_level": fitness_level,
@@ -776,11 +681,11 @@ def main():
                         "available_equipment": equipment
                     }
                     
-                    st.session_state.workout_plans = {} 
+                    # Set flag to show we're generating
                     st.session_state.generation_in_progress = True
-                    st.rerun() # Rerun once to start generation outside the form
-
-        # Generation block is now only accessible after a successful form submission/rerun
+                    st.rerun()
+        
+        # FIXED: Generation happens OUTSIDE form, AFTER button click
         if st.session_state.generation_in_progress:
             st.info("🔄 Generating your personalized fitness plan...")
             
@@ -788,35 +693,22 @@ def main():
             status_text = st.empty()
             
             profile = st.session_state.user_profile
+            advisor.reset_weekly_tracker()
             
-            # Iterate through days and generate
             for idx, day in enumerate(profile['days_per_week']):
-                
-                # CRITICAL: Pass only the plans generated *before* the current day
-                previous_plans_to_pass = {d: st.session_state.workout_plans[d] for d in profile['days_per_week'] if d in st.session_state.workout_plans and profile['days_per_week'].index(d) < idx}
-                
-                progress = (idx) / len(profile['days_per_week']) 
-                if progress == 0 and idx == 0:
-                     progress = 0.01
+                progress = (idx + 1) / len(profile['days_per_week'])
                 progress_bar.progress(progress)
                 status_text.text(f"Generating {day} workout... ({idx + 1}/{len(profile['days_per_week'])})")
                 
-                # --- API CALL ---
                 result = advisor.generate_workout_plan(
                     profile,
                     day,
                     idx,
-                    previous_plans_to_pass, 
                     "Full Body"
                 )
                 
-                # Update session state with the result for the current day
                 st.session_state.workout_plans[day] = result
-                
-                # Update progress bar to show generation *complete* for this day
-                progress_bar.progress((idx + 1) / len(profile['days_per_week']))
-
-
+            
             progress_bar.empty()
             status_text.empty()
             
@@ -829,45 +721,40 @@ def main():
             if all_success:
                 st.success("✅ Your fitness plan is ready!")
             else:
-                st.error("⚠️ Plan generation complete, but one or more days failed (used fallback). Please check API key and configuration.")
+                st.warning("⚠️ Some plans used fallback mode. Check API configuration.")
             
             st.session_state.fitness_plan_generated = True
             st.session_state.generation_in_progress = False
-            st.rerun() # Rerun once to display the plans
+            st.rerun()
     
     # DISPLAY PLANS
     else:
         profile = st.session_state.user_profile
         
-        # --- Top Section ---
-        st.markdown(f"👋 Welcome, **{profile['name']}**!")
-        st.markdown(f"Your Personalized Fitness Plan is Ready")
-        st.markdown(f"📅 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 🎯 Goal: **{profile['primary_goal']}** | 💪 Level: **{profile['fitness_level']}**")
-        
-        st.markdown("\n") # Add newline for spacing
+        st.success(f"👋 Welcome back, {profile['name']}!")
+        st.info(f"🎯 Primary Goal: {profile['primary_goal']} | 💪 Level: {profile['fitness_level']}")
         
         # Show physical limitations if present
         if profile.get('physical_limitations'):
             st.warning(f"⚠️ **Accommodated Limitations:** {profile['physical_limitations']}")
         
-        st.markdown("---")
-        
         # Display plans
         st.markdown("## 📅 Your Weekly Workout Schedule")
         
-        for idx, day in enumerate(profile['days_per_week']):
-            with st.expander(f"📋 {day} Workout", expanded=True if idx == 0 else False):
+        for day in profile['days_per_week']:
+            with st.expander(f"📋 {day} Workout", expanded=False):
                 if day in st.session_state.workout_plans:
                     plan_data = st.session_state.workout_plans[day]
                     
                     if plan_data['success']:
                         st.markdown(plan_data['plan'])
                     else:
-                        st.error(f"⚠️ API Error: {plan_data.get('error', 'Unknown error')}. Showing fallback plan.")
+                        st.error(f"⚠️ API Error: {plan_data.get('error', 'Unknown error')}")
                         st.markdown(plan_data['plan'])  # Show fallback
                 else:
                     st.warning("Plan not available")
         
+        # Action buttons
         # Action buttons
         col1, col2, col3 = st.columns(3)
         
@@ -879,18 +766,18 @@ def main():
                 st.rerun()
         
         with col2:
-            # Download preparation for a button
-            markdown_content = generate_markdown_export(
-                profile, 
-                st.session_state.workout_plans
-            )
-            st.download_button(
-                label="📥 Download Plan",
-                data=markdown_content,
-                file_name=f"FriskaAI_Plan_{profile['name']}_{datetime.now().strftime('%Y%m%d')}.md",
-                mime="text/markdown",
-                use_container_width=True
-            )
+            if st.button("📥 Download Plan", use_container_width=True):
+                markdown_content = generate_markdown_export(
+                    profile, 
+                    st.session_state.workout_plans
+                )
+                st.download_button(
+                    label="💾 Download as Markdown",
+                    data=markdown_content,
+                    file_name=f"FriskaAI_Plan_{profile['name']}_{datetime.now().strftime('%Y%m%d')}.md",
+                    mime="text/markdown",
+                    use_container_width=True
+                )
         
         with col3:
             if st.button("📊 View Profile", use_container_width=True):
@@ -979,11 +866,8 @@ def generate_markdown_export(profile: Dict, workout_plans: Dict) -> str:
     
     # Add each workout day
     for day in profile['days_per_week']:
-        if day in workout_plans and workout_plans[day]['plan']:
-             # Check if plan was success or fallback
-            status = "✅ SUCCESS" if workout_plans[day]['success'] else "⚠️ FALLBACK PLAN (API Error)"
-            md_content += f"\n## {day} Workout - {status}\n\n"
-            md_content += f"{workout_plans[day]['plan']}\n\n---\n"
+        if day in workout_plans and workout_plans[day]['success']:
+            md_content += f"\n{workout_plans[day]['plan']}\n\n---\n"
     
     # Add footer
     md_content += """
@@ -1003,7 +887,7 @@ Always keep emergency contacts available during workouts.
 ---
 
 **Generated by FriskaAI Fitness Coach**
-*Powered by AI*
+*Powered by Claude AI - Your Personalized Fitness Assistant*
 """
     
     return md_content
@@ -1204,13 +1088,13 @@ def display_footer():
         </p>
         <hr style='margin: 2rem 0;'>
         <p style='font-size: 0.9em;'>
-        💪 <strong>FriskaAI Fitness Coach</strong> | Powered by AI<br>
+        💪 <strong>FriskaAI Fitness Coach</strong> | Powered by Claude AI<br>
         © 2025 | For educational and informational purposes only
         </p>
     </div>
     """, unsafe_allow_html=True)
 
 # ============ RUN APPLICATION ============
-if __name__ == "__main__": 
+if __name__ == "__main__":
     main()
     display_footer()

@@ -444,6 +444,16 @@ Generate the complete workout plan now in English only.
         """Generate workout plan with fixed API call"""
         
         try:
+            # The prompt is now generated outside this method in the main loop
+            # and passed to the API call directly via the 'user' content.
+            # We assume the caller (main function) provides the complete system prompt
+            # in the session state for display. Here we re-fetch it or generate it
+            # if we were to strictly follow the original logic, but for the
+            # purpose of displaying, we will rely on the main function calling
+            # _build_system_prompt separately.
+            
+            # Since the structure passes all required params, let's just generate the prompt here again
+            # for the API call payload.
             system_prompt = self._build_system_prompt(
                 user_profile, day_name, day_index, previous_plans, workout_category
             )
@@ -621,7 +631,11 @@ def initialize_session_state():
         st.session_state.generation_in_progress = False
     if 'form_submitted_and_validated' not in st.session_state:
         st.session_state.form_submitted_and_validated = False
+    # NEW: State for storing the generated LLM prompts
+    if 'all_prompts' not in st.session_state:
+        st.session_state.all_prompts = {}
 
+# ============ MAIN APPLICATION ============
 # ============ MAIN APPLICATION ============
 def main():
     """Main application"""
@@ -639,7 +653,9 @@ def main():
     """, unsafe_allow_html=True)
     
     # MAIN FORM
-    if not st.session_state.fitness_plan_generated:
+    if not st.session_state.fitness_plan_generated and not st.session_state.generation_in_progress:
+        # ... (Your form code remains here - only form inputs) ...
+        # (The form submission logic remains as is, setting st.session_state.generation_in_progress = True and st.rerun())
         
         with st.form("fitness_form"):
             
@@ -777,65 +793,100 @@ def main():
                     }
                     
                     st.session_state.workout_plans = {} 
+                    st.session_state.all_prompts = {} # CLEAR PROMPTS
                     st.session_state.generation_in_progress = True
                     st.rerun() # Rerun once to start generation outside the form
 
-        # Generation block is now only accessible after a successful form submission/rerun
-        if st.session_state.generation_in_progress:
-            st.info("🔄 Generating your personalized fitness plan...")
-            
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            profile = st.session_state.user_profile
-            
-            # Iterate through days and generate
-            for idx, day in enumerate(profile['days_per_week']):
-                
-                # CRITICAL: Pass only the plans generated *before* the current day
-                previous_plans_to_pass = {d: st.session_state.workout_plans[d] for d in profile['days_per_week'] if d in st.session_state.workout_plans and profile['days_per_week'].index(d) < idx}
-                
-                progress = (idx) / len(profile['days_per_week']) 
-                if progress == 0 and idx == 0:
-                     progress = 0.01
-                progress_bar.progress(progress)
-                status_text.text(f"Generating {day} workout... ({idx + 1}/{len(profile['days_per_week'])})")
-                
-                # --- API CALL ---
-                result = advisor.generate_workout_plan(
-                    profile,
-                    day,
-                    idx,
-                    previous_plans_to_pass, 
-                    "Full Body"
-                )
-                
-                # Update session state with the result for the current day
-                st.session_state.workout_plans[day] = result
-                
-                # Update progress bar to show generation *complete* for this day
-                progress_bar.progress((idx + 1) / len(profile['days_per_week']))
+    # =================================================================================
+    # GENERATION BLOCK (Only runs when st.session_state.generation_in_progress is True)
+    # This block executes fully and then reruns to the display state.
+    # =================================================================================
+    if st.session_state.generation_in_progress:
+        st.subheader("🔄 Generating your personalized fitness plan...")
+        
+        # PROMPT DISPLAY SECTION - Display ALL prompts generated so far
+        st.markdown("---")
+        st.subheader("💡 LLM Prompts for Accuracy Testing")
+        st.info("The text below is the *exact* prompt sent to the Mistral LLM for each day as it's generated.")
+        
+        # Prepare components
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        profile = st.session_state.user_profile
+        
+        # The prompt container is crucial for live updates
+        prompt_container = st.container()
 
-
-            progress_bar.empty()
-            status_text.empty()
+        # Iterate through days and generate
+        for idx, day in enumerate(profile['days_per_week']):
             
-            # Check if all succeeded
-            all_success = all(
-                st.session_state.workout_plans[day]['success'] 
-                for day in profile['days_per_week']
+            # CRITICAL: Pass only the plans generated *before* the current day
+            previous_plans_to_pass = {d: st.session_state.workout_plans[d] for d in profile['days_per_week'] if d in st.session_state.workout_plans and profile['days_per_week'].index(d) < idx}
+            
+            # --- PROMPT GENERATION (FOR DISPLAY & API) ---
+            system_prompt = advisor._build_system_prompt(
+                profile, 
+                day, 
+                idx, 
+                previous_plans_to_pass, 
+                "Full Body"
             )
             
-            if all_success:
-                st.success("✅ Your fitness plan is ready!")
-            else:
-                st.error("⚠️ Plan generation complete, but one or more days failed (used fallback). Please check API key and configuration.")
+            # Store the prompt for display
+            st.session_state.all_prompts[day] = system_prompt
             
-            st.session_state.fitness_plan_generated = True
-            st.session_state.generation_in_progress = False
-            st.rerun() # Rerun once to display the plans
+            # Display the prompt for the current day inside the container
+            with prompt_container:
+                with st.expander(f"Prompt for **{day}** (Click to view)", expanded=False):
+                    st.code(system_prompt, language='markdown')
+
+            # --- API CALL ---
+            progress = (idx) / len(profile['days_per_week']) 
+            if progress == 0 and idx == 0:
+                 progress = 0.01
+            progress_bar.progress(progress)
+            status_text.text(f"Generating {day} workout... ({idx + 1}/{len(profile['days_per_week'])})")
+            
+            result = advisor.generate_workout_plan(
+                profile,
+                day,
+                idx,
+                previous_plans_to_pass, 
+                "Full Body"
+            )
+            
+            # Update session state with the result for the current day
+            st.session_state.workout_plans[day] = result
+            
+            # Update progress bar to show generation *complete* for this day
+            progress_bar.progress((idx + 1) / len(profile['days_per_week']))
+
+
+        progress_bar.empty()
+        status_text.empty()
+        
+        # Final status check and transition
+        all_success = all(
+            st.session_state.workout_plans[day]['success'] 
+            for day in profile['days_per_week']
+        )
+        
+        if all_success:
+            st.success("✅ Your fitness plan is ready! See the generated plan and the prompts below.")
+        else:
+            st.error("⚠️ Plan generation complete, but one or more days failed (used fallback). Check the API key and error messages in the console.")
+        
+        # Set final flags and rerun to the display state
+        st.session_state.fitness_plan_generated = True
+        st.session_state.generation_in_progress = False
+        st.rerun() 
+        # The script will now exit this block and move to the 'DISPLAY PLANS' block.
+    # =================================================================================
     
     # DISPLAY PLANS
+    # ... (Rest of your code for displaying plans remains here) ...
+    # (Removed for brevity in this response, but keep it in your file)
     else:
         profile = st.session_state.user_profile
         
@@ -851,6 +902,15 @@ def main():
             st.warning(f"⚠️ **Accommodated Limitations:** {profile['physical_limitations']}")
         
         st.markdown("---")
+        
+        # DEBUGGING PROMPT SECTION (Show on result page as well)
+        if st.session_state.all_prompts:
+            st.markdown("## ⚙️ Debugging: LLM Prompts (For Testing)")
+            with st.expander("Show Generated LLM Prompts", expanded=False):
+                for day, prompt in st.session_state.all_prompts.items():
+                    st.markdown(f"### Prompt for {day}")
+                    st.code(prompt, language='markdown')
+            st.markdown("---")
         
         # Display plans
         st.markdown("## 📅 Your Weekly Workout Schedule")
@@ -876,6 +936,7 @@ def main():
                 st.session_state.fitness_plan_generated = False
                 st.session_state.workout_plans = {}
                 st.session_state.user_profile = {}
+                st.session_state.all_prompts = {} # Clear prompts on restart
                 st.rerun()
         
         with col2:

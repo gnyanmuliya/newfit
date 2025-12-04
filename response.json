@@ -1,0 +1,237 @@
+{
+  "plan_metadata": {
+    "generated_on": "December 02, 2025",
+    "status": "SUCCESS",
+    "total_estimated_calories": 80
+  },
+  "profile_summary": {
+    "name": "Gnyan",
+    "age": 30,
+    "gender": "Male",
+    "bmi": 24.2,
+    "primary_goal": "General Fitness",
+    "secondary_goal": "None",
+    "fitness_level": "Level 3 – Moderate / Independent",
+    "training_days": ["Monday"],
+    "session_duration": "30-45 minutes",
+    "medical_conditions": "None",
+    "physical_limitations": "None",
+    "available_equipment": ["Bodyweight Only"],
+    "weekly_progression_goal": "Next week, consider adding a few more reps or sets to each exercise to increase intensity."
+  },
+  "workout_day": {
+    "day_name": "Monday",
+    "warmup": {
+      "duration": "7 minutes",
+      "exercises": [
+        {
+          "name": "Marching in Place",
+          "benefit": "Increases heart rate and prepares the body for exercise",
+          "sets": 1,
+          "reps_description": "120 (1-2 min equiv.)",
+          "intensity_rpe": 2,
+          "rest": "15 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep a steady pace and maintain balance.",
+          "estimated_calories": 5,
+          "steps": [
+            "Stand tall with feet hip-width apart.",
+            "March in place, lifting knees high.",
+            "Swing arms naturally at the sides."
+          ]
+        },
+        {
+          "name": "Arm Circles",
+          "benefit": "Improves shoulder mobility and warms up the upper body",
+          "sets": 1,
+          "reps_description": "30",
+          "intensity_rpe": 2,
+          "rest": "15 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the movements controlled and avoid straining the shoulders.",
+          "estimated_calories": 5,
+          "steps": [
+            "Stand tall with feet shoulder-width apart.",
+            "Extend arms out to the sides at shoulder height.",
+            "Make small circular movements with the arms, gradually increasing the size of the circles."
+          ]
+        },
+        {
+          "name": "Leg Swings",
+          "benefit": "Enhances hip mobility and prepares the lower body for exercise",
+          "sets": 1,
+          "reps_description": "20 / side",
+          "intensity_rpe": 2,
+          "rest": "15 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Maintain balance and avoid swinging too high or too fast.",
+          "estimated_calories": 5,
+          "steps": [
+            "Stand tall holding onto a stable chair or wall for support.",
+            "Swing one leg forward and backward in a controlled motion.",
+            "Keep the leg straight and swing from the hip, not the knee."
+          ]
+        }
+      ]
+    },
+    "main_workout": {
+      "category": "Full-Body Strength",
+      "exercises": [
+        {
+          "name": "Push-Up",
+          "benefit": "Strengthens the chest, shoulders, and triceps",
+          "sets": 2,
+          "reps_description": "10-15",
+          "intensity_rpe": 6,
+          "rest": "45-60 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the body in a straight line and avoid arching the back.",
+          "estimated_calories": 5,
+          "steps": [
+            "Start in a high plank position with hands shoulder-width apart.",
+            "Lower the body until the chest is close to the ground.",
+            "Push back up to the starting position."
+          ]
+        },
+        {
+          "name": "Squat",
+          "benefit": "Strengthens the legs and glutes",
+          "sets": 2,
+          "reps_description": "10-15",
+          "intensity_rpe": 6,
+          "rest": "45-60 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the knees behind the toes and maintain a neutral spine.",
+          "estimated_calories": 6,
+          "steps": [
+            "Stand with feet shoulder-width apart.",
+            "Lower the body as if sitting in a chair, keeping the weight in the heels.",
+            "Push through the heels to stand back up."
+          ]
+        },
+        {
+          "name": "Plank",
+          "benefit": "Strengthens the core and improves stability",
+          "sets": 2,
+          "reps_description": "30-45 seconds (or max hold)",
+          "intensity_rpe": 6,
+          "rest": "45-60 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the neck neutral and avoid straining the lower back.",
+          "estimated_calories": 5,
+          "steps": [
+            "Lie face down with forearms on the ground and hands shoulder-width apart.",
+            "Push up onto the toes, keeping the body in a straight line.",
+            "Hold the position without letting the hips sag or pike up."
+          ]
+        },
+        {
+          "name": "Lunge",
+          "benefit": "Strengthens the legs and glutes, improves balance",
+          "sets": 2,
+          "reps_description": "10-15 / side",
+          "intensity_rpe": 6,
+          "rest": "45-60 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the front knee behind the toes and maintain an upright torso.",
+          "estimated_calories": 12,
+          "steps": [
+            "Stand tall with feet hip-width apart.",
+            "Step forward with one foot, lowering the body until the front knee is at a 90-degree angle.",
+            "Push through the front heel to return to the starting position."
+          ]
+        },
+        {
+          "name": "Bicycle Crunches",
+          "benefit": "Strengthens the abdominals and obliques",
+          "sets": 2,
+          "reps_description": "10-15 / side",
+          "intensity_rpe": 6,
+          "rest": "45-60 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the lower back pressed into the floor and avoid pulling on the neck.",
+          "estimated_calories": 22,
+          "steps": [
+            "Lie on your back with hands behind the head and legs extended.",
+            "Bring the right knee towards the chest and twist the upper body to bring the left elbow towards the right knee.",
+            "Switch sides, bringing the left knee towards the chest and the right elbow towards the left knee."
+          ]
+        },
+        {
+          "name": "Glute Bridge",
+          "benefit": "Strengthens the glutes and hamstrings",
+          "sets": 2,
+          "reps_description": "10-15",
+          "intensity_rpe": 6,
+          "rest": "45-60 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the shoulders and head on the ground and avoid arching the back.",
+          "estimated_calories": 5,
+          "steps": [
+            "Lie on your back with knees bent and feet flat on the ground.",
+            "Engage the glutes and lift the hips until the body forms a straight line from shoulders to knees.",
+            "Lower the hips back down to the starting position."
+          ]
+        }
+      ]
+    },
+    "cooldown": {
+      "duration": "5 minutes",
+      "exercises": [
+        {
+          "name": "Child's Pose",
+          "benefit": "Stretches the back and hips, promotes relaxation",
+          "sets": 1,
+          "hold_duration": "30-60 seconds",
+          "intensity_rpe": 2,
+          "rest": "15 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the knees comfortable and avoid straining the lower back.",
+          "estimated_calories": 5,
+          "steps": [
+            "Kneel on the floor with knees hip-width apart and feet together behind you.",
+            "Sit back on your heels and extend your arms in front of you.",
+            "Rest your forehead on the ground and hold the position."
+          ]
+        },
+        {
+          "name": "Seated Forward Bend",
+          "benefit": "Stretches the hamstrings and lower back",
+          "sets": 1,
+          "hold_duration": "30-60 seconds",
+          "intensity_rpe": 2,
+          "rest": "15 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the back straight and avoid rounding the spine.",
+          "estimated_calories": 5,
+          "steps": [
+            "Sit on the floor with legs extended in front of you.",
+            "Reach forward towards your toes, keeping the back straight.",
+            "Hold the position, feeling a gentle stretch in the hamstrings."
+          ]
+        },
+        {
+          "name": "Deep Belly Breathing",
+          "benefit": "Promotes relaxation and reduces stress",
+          "sets": 1,
+          "hold_duration": "N/A",
+          "intensity_rpe": 2,
+          "rest": "15 seconds",
+          "equipment": "Bodyweight Only",
+          "safety_cue": "Keep the breath slow and controlled, avoiding any strain.",
+          "estimated_calories": 0,
+          "steps": [
+            "Lie on your back with knees bent and feet flat on the ground.",
+            "Place one hand on your chest and the other on your belly.",
+            "Inhale deeply through the nose, filling the lungs completely, and exhale slowly through the mouth."
+          ]
+        }
+      ]
+    },
+    "safety_notes": [
+      "Avoid any exercises that cause pain or discomfort in the joints.",
+      "Stay hydrated throughout the workout and listen to your body for any signs of fatigue.",
+      "Maintain proper form during each exercise to avoid injury and maximize benefits."
+    ]
+  }
+}
