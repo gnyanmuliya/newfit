@@ -9,6 +9,7 @@ import numpy as np
 import time
 import os # Import os for path handling
 from dotenv import load_dotenv # New import
+import difflib # Import for fuzzy matching
 
 load_dotenv() # Load environment variables immediately
 
@@ -142,22 +143,47 @@ MEDICAL_CONDITIONS_OPTIONS = ["None"] + sorted([c for c in CONDITION_DATABASE.ke
 # ============ FITNESS LEVELS REDEFINED ============
 TRAINING_LEVELS = {
     "Beginner (0–6 months)": {
-        "description": "Just starting or returning after a long break. Focus on form, stability, and mastering basic movements. RPE 3-5.",
+        "description": "New or detrained users with low motor control. Focus on strictly low-impact movements.",
         "rpe_range": "3-5",
-        "rules": "Prioritize seated, supported, or simple bodyweight movements. Avoid high-impact or complex multi-joint movements.",
-        "met_key": "met_low" # Key for MET lookup
+        "rules": "Low-impact only. Prioritize mobility, stability, and support-based balance drills.",
+        "met_key": "met_low",
+        "allowed_examples": [
+            "Chair squat", "Box squat", "Glute bridge", "Hip hinge drills",
+            "Wall push-up", "Band rows", "Seated rows", "Marching", 
+            "Step-ups", "Dead bug", "Bird dog", "Mobility drills"
+        ],
+        "excluded_exercises": [
+            "Burpees", "Jumps", "Barbells", "Pistol squats", "HIIT", "Sprints"
+        ]
     },
     "Intermediate (6 months–2 years)": {
-        "description": "Consistent experience. Ready to increase volume, introduce external resistance, and learn complex exercises. RPE 5-7.",
+        "description": "Users with foundational strength ready for moderate loading and progressive resistance.",
         "rpe_range": "5-7",
-        "rules": "Focus on unassisted compound movements, progressive resistance, and moderate duration cardio/intervals.",
-        "met_key": "met_mod" # Key for MET lookup
+        "rules": "Focus on foundational strength, moderate loading, and conditioning. Avoid advanced plyometrics.",
+        "met_key": "met_mod",
+        "allowed_examples": [
+            "Goblet squat", "Lunges", "Split squats", "DB RDL",
+            "Incline push-up", "Full push-up", "Row variations", 
+            "Jogging", "Light conditioning", "Planks", "Side planks"
+        ],
+        "excluded_exercises": [
+            "Advanced plyometrics", "Heavy barbell work", "Olympic lifts"
+        ]
     },
     "Advanced (2+ years)": {
-        "description": "Highly consistent training history. Focus on maximizing intensity, heavy loads, and specialized training splits. RPE 7-9.",
+        "description": "Highly trained individuals capable of maximizing intensity and handling heavy loads.",
         "rpe_range": "7-9",
-        "rules": "Incorporate advanced variations, heavy loading, high intensity intervals, and specialized splits (like Push/Pull/Legs).",
-        "met_key": "met_high" # Key for MET lookup
+        "rules": "Incorporate controlled power movements, heavy loading, and high-intensity intervals.",
+        "met_key": "met_high",
+        "allowed_examples": [
+            "Loaded squats", "Weighted lunges", "Deadlifts", 
+            "Pull-ups", "Dips", "Hanging core work", 
+            "HIIT", "Sprints", "Controlled power movements"
+        ],
+        "excluded_exercises": [
+            "Unsafe movements for specific conditions (seniors/medical)",
+            "Olympic lifts (unless explicitly requested)"
+        ]
     }
 }
 
@@ -229,11 +255,12 @@ def parse_time_to_seconds(time_str: str) -> float:
     
     return 0.0
 
-def parse_llm_calories(calorie_str: str) -> int:
-    """Extracts the integer calorie value from the LLM's 'Est: X Cal' string."""
-    # This function is now used to parse the Python-generated Calorie string (e.g., "Est: 100 Cal (MET: 5.5)")
-    match = re.search(r'Est: (\d+) Cal', calorie_str)
-    return int(match.group(1)) if match else 0
+# Removed parse_llm_calories as it is no longer used.
+# def parse_llm_calories(calorie_str: str) -> int:
+#     """Extracts the integer calorie value from the LLM's 'Est: X Cal' string."""
+#     # This function is now used to parse the Python-generated Calorie string (e.g., "Est: 100 Cal (MET: 5.5)")
+#     match = re.search(r'Est: (\d+) Cal', calorie_str)
+#     return int(match.group(1)) if match else 0
 
 class FitnessAdvisor:
     """Enhanced fitness planning engine with proper API integration"""
@@ -310,26 +337,39 @@ class FitnessAdvisor:
         }
 
     def _get_met_value(self, exercise_name: str, fitness_level: str) -> float:
-        """Looks up the dynamic MET value based on exercise name (cleaned) and user level."""
+        """
+        Looks up the dynamic MET value based on exercise name (cleaned) and user level, 
+        using fuzzy matching as a fallback for robustness.
+        """
         
         # Determine the correct MET key based on fitness level
         met_col_key = TRAINING_LEVELS.get(fitness_level, TRAINING_LEVELS["Beginner (0–6 months)"])['met_key']
         
-        # Clean the exercise name to find a match in the MET database keys
-        # Example: "Wall Push-ups (Standard)" -> "wall_push_up" (using a simple heuristic/regex)
-        clean_name = re.sub(r'[\s\(\)-]+', '_', exercise_name.lower()).strip('_')
+        # Clean the exercise name to find a match in the MET database keys (e.g., "Wall Push-ups (Standard)" -> "wall_push_up")
+        clean_name_base = re.sub(r'[\s\(\)-]+', '_', exercise_name.lower()).strip('_')
         
-        # Try finding a direct match
+        # 1. Try finding a direct match
         for key, data in MET_DATABASE.items():
-            if clean_name.startswith(key):
-                return data.get(met_col_key, 3.0) # Default to 3.0 MET if key is missing
+            if clean_name_base.startswith(key):
+                return data.get(met_col_key, 3.0) # Default to 3.0 MET if level key is missing
         
-        # Fallback based on activity type if no specific match is found
-        if 'walk' in clean_name or 'march' in clean_name or 'stretch' in clean_name or 'mobility' in clean_name:
+        # 2. Apply Fuzzy Matching for robustness
+        met_keys = list(MET_DATABASE.keys())
+        
+        # We look for the closest match in the MET database keys (cutoff threshold 0.7 for reasonable match)
+        close_matches = difflib.get_close_matches(clean_name_base, met_keys, n=1, cutoff=0.7)
+        
+        if close_matches:
+            best_match_key = close_matches[0]
+            # Use the MET value for the closest matched exercise
+            return MET_DATABASE[best_match_key].get(met_col_key, 3.0)
+            
+        # 3. Fallback based on activity type if no specific or fuzzy match is found
+        if 'walk' in clean_name_base or 'march' in clean_name_base or 'stretch' in clean_name_base or 'mobility' in clean_name_base:
             return 3.0 # Low intensity fallback
-        if 'squat' in clean_name or 'lunge' in clean_name or 'press' in clean_name or 'row' in clean_name:
+        if 'squat' in clean_name_base or 'lunge' in clean_name_base or 'press' in clean_name_base or 'row' in clean_name_base:
             return 5.0 # Moderate intensity fallback
-        if 'jump' in clean_name or 'run' in clean_name or 'burpee' in clean_name:
+        if 'jump' in clean_name_base or 'run' in clean_name_base or 'burpee' in clean_name_base:
             return 8.0 # High intensity fallback
         
         return 3.0 # General safe fallback MET value
@@ -352,7 +392,7 @@ class FitnessAdvisor:
 
     def _calculate_calorie_rate(self, exercise_name: str, weight_kg: float) -> tuple[float, str]:
         """
-        [MODIFIED] Determines the unit of effort (Rep/Sec) for logging based on exercise name.
+        Determines the unit of effort (Rep/Sec) for logging based on exercise name.
         """
         name = exercise_name.lower()
         
@@ -371,10 +411,10 @@ class FitnessAdvisor:
 
     def _calculate_total_estimated_calories(self, exercise_data: Dict, weight_kg: float, fitness_level: str) -> str:
         """
-        [NEW LOGIC] Calculates estimated calories using the MET lookup and the time duration.
+        [FIX 2 Implementation] Calculates estimated calories using the MET lookup and the time duration.
+        Crucially, this now calculates the burn for **ALL planned sets**, ensuring the JSON/MD export
+        reflects the total estimated burn based on the full workout plan's volume (sets * reps/duration).
         Formula: Calories = (MET * Weight_KG * 3.5) / 200 * (Duration in minutes)
-        
-        This logic is crucial and replaces the LLM's estimate during markdown generation.
         """
         
         name = exercise_data.get('name', 'Unknown Exercise')
@@ -393,8 +433,8 @@ class FitnessAdvisor:
 
         # Determine total duration in seconds (units)
         section_key = 'main' # Assume main if not explicitly passed
-        if 'warmup' in exercise_data: section_key = 'warmup'
-        if 'cooldown' in exercise_data: section_key = 'cooldown'
+        if exercise_data.get('warmup'): section_key = 'warmup'
+        if exercise_data.get('cooldown'): section_key = 'cooldown'
         
         avg_units_per_set = 0.0
         
@@ -432,12 +472,13 @@ class FitnessAdvisor:
                     avg_reps *= 2
                 
                 # Estimate time: 5 seconds per rep + 10 seconds transition
-                avg_units_per_set = (avg_reps * 5) + 10 # seconds
+                avg_units_per_set = (avg_reps * 5) + 10 # seconds. This is the estimated duration of a SINGLE set in seconds.
 
         except Exception as e:
             # Fallback to a fixed 60 seconds duration per set on parsing error
             avg_units_per_set = 60.0
             
+        # *** Calculate total time using ALL planned sets ***
         total_seconds = num_sets * avg_units_per_set
         total_minutes = total_seconds / 60.0
 
@@ -446,11 +487,11 @@ class FitnessAdvisor:
         
         # Check for division by zero
         if weight_kg == 0 or total_minutes == 0:
-            return "Est: 0 Cal"
+            return "Est: 0 Cal (MET: 0.0)"
 
         estimated_calories = (met_value * weight_kg * 3.5) / 200 * total_minutes
         
-        return f"Est: {round(estimated_calories)} Cal (MET: {met_value})" 
+        return f"Est: {round(estimated_calories)} Cal (MET: {met_value:.1f})" 
 
     def _determine_split_focus_and_repetition(self, total_days: int, day_index: int, fitness_level: str) -> tuple[str, str]:
         """Determine the body part focus and the repetition rule for the current day based on complex rules."""
@@ -562,9 +603,10 @@ class FitnessAdvisor:
 
     def _convert_plan_to_markdown_enhanced(self, plan_json: Dict, profile: Dict) -> str:
         """
-        [MODIFIED] Converts the structured JSON plan back into a user-friendly Markdown string 
+        [FIX 2 Implementation] Converts the structured JSON plan back into a user-friendly Markdown string 
         and calculates/stores the total planned units AND calls Python to calculate accurate calories 
-        using the new MET lookup logic.
+        using the new MET lookup logic. This function ensures the `plan_json` object is updated 
+        in-place with the correct calorie values before being saved to session state for export.
         """
         if not plan_json:
             return "Plan structure is missing or empty."
@@ -617,7 +659,7 @@ class FitnessAdvisor:
             safety_cue = exercise_data.get('safety_cue', 'N/A')
             
             # --- CALORIE CALCULATION (PYTHON/MET-BASED) ---
-            # Use the new helper function to calculate accurate calories
+            # Call the function to calculate the estimated calories for **ALL PLANNED SETS**
             calorie_calc_str = self._calculate_total_estimated_calories(
                 {'name': name, 'sets': sets_value, 'reps': reps_value, 'hold': hold_duration, 'warmup': section_type=='warmup', 'cooldown': section_type=='cooldown'}, 
                 weight_kg, 
@@ -630,33 +672,30 @@ class FitnessAdvisor:
             
             estimated_calories_per_exercise = int(estimated_calories_match.group(1)) if estimated_calories_match else 0
             met_used = met_match.group(1) if met_match else '?'
+            met_used_float = float(met_used) if met_match and met_match.group(1).replace('.', '', 1).isdigit() else 3.0 # Store MET as float
 
             total_calories_burned += estimated_calories_per_exercise
             calorie_burn_str = f"Est: {estimated_calories_per_exercise} Cal (MET: {met_used})"
                 
             # --- PLANNED UNITS CALCULATION (CRITICAL FOR NEW CALC) ---
+            # Recalculate units/set for logging defaults (should still be single set)
             num_planned_sets = 1
             avg_planned_units_per_set = 0.0
             
             try:
-                # 1. Planned Sets
-                num_planned_sets = int(sets_value.split('-')[-1].strip()) if '-' in sets_value else int(sets_value.strip())
-                num_planned_sets = max(1, num_planned_sets) # Ensure non-zero
+                # 1. Planned Sets (use the full sets value here only for the metadata storage, not for the calorie formula itself, which is already calculated above)
+                num_planned_sets_total = int(sets_value.split('-')[-1].strip()) if '-' in sets_value else int(sets_value.strip())
+                num_planned_sets_total = max(1, num_planned_sets_total) # Ensure non-zero
                 
-                # 2. Planned Units (Reps or Seconds)
+                # 2. Planned Units (Reps or Seconds) for ONE SET
                 if section_type == 'cooldown':
-                    # Use hold duration in seconds
                     avg_planned_units_per_set = parse_time_to_seconds(hold_duration or '30 seconds')
                 elif rep_label == "Hold Duration":
-                    # Use reps_value if it's an isometric hold time (in main workout)
                     avg_planned_units_per_set = parse_time_to_seconds(reps_value)
-                # For first warmup cardio, use fixed 90 seconds if reps are text based (1-2 min equiv.)
                 elif index == 1 and section_type == 'warmup' and ('min equiv' in reps_value.lower() or 'minute' in reps_value.lower()):
-                    # Use 90 seconds (1.5 min) as the planned duration for unit rate calculation
                     avg_planned_units_per_set = 90.0 
                     
                 else:
-                    # Use reps for dynamic/strength movements
                     if '-' in reps_value:
                         low = int(re.search(r'(\d+)', reps_value.split('-')[0]).group(1))
                         high_part = reps_value.split('-')[-1]
@@ -667,7 +706,6 @@ class FitnessAdvisor:
                     else:
                         avg_reps = 10
                     
-                    # Account for "per side" or "each leg"
                     if 'side' in reps_value.lower() or 'each' in reps_value.lower():
                         avg_reps *= 2
                         
@@ -675,17 +713,25 @@ class FitnessAdvisor:
 
             except Exception as e:
                 # Fallback to defaults on parsing error
-                num_planned_sets = 1
+                num_planned_sets_total = 1
                 avg_planned_units_per_set = 10.0
             
-            # Total Planned Units = Sets * Units per set
-            planned_total_units = num_planned_sets * avg_planned_units_per_set
+            # Total Planned Units (for calculation rate use)
+            # This is the total units (reps or seconds) across all planned sets
+            planned_total_units = num_planned_sets_total * avg_planned_units_per_set
 
             # Store computed planned data for the performance calculation function
-            exercise_data['planned_sets'] = num_planned_sets
-            exercise_data['planned_units_per_set'] = avg_planned_units_per_set
-            exercise_data['planned_total_units'] = planned_total_units
-            exercise_data['planned_total_cal'] = estimated_calories_per_exercise
+            # CRITICAL FIX: Ensure planned_total_cal is the multi-set value
+            exercise_data['planned_sets_count'] = num_planned_sets_total # Total sets planned
+            exercise_data['planned_units_per_set'] = avg_planned_units_per_set # Units per single set (used for logging input default)
+            exercise_data['planned_total_units'] = planned_total_units # Total units across all sets (reps or seconds)
+            exercise_data['planned_total_cal'] = estimated_calories_per_exercise # Correct multi-set total
+            exercise_data['met_value'] = met_used_float 
+            
+            # --- CRITICAL FIX: Overwrite LLM's dummy value with Python's calculated value ---
+            # This ensures the JSON export and the static MD reflect the accurate calorie calculation.
+            exercise_data['est_calories'] = calorie_calc_str 
+            # ---------------------------------------------------------------------------------
             
             # Start of the strictly formatted output
             output = f"{index}. **{name}**\n\n"
@@ -705,7 +751,9 @@ class FitnessAdvisor:
             output += f"**Intensity:** RPE {intensity_value}\n\n"
             output += f"**Rest:** {rest_value_display}\n\n"
             output += f"**Equipment:** {equipment}\n\n"
-            output += f"**Safety Cue:** {safety_cue} (Prioritize stability and balance.)\n\n"
+            # FIX: Ensure safety_cue from the LLM's JSON is always displayed, even if it's 'N/A' from the LLM.
+            # The fallback logic for the displayed markdown is removed here as the JSON should contain a value.
+            output += f"**Safety Cue:** {safety_cue}\n\n"
             output += f"**Est. Calories Burned:** {calorie_burn_str}\n\n" # Python-calculated Calorie field
             
             return output
@@ -803,7 +851,8 @@ class FitnessAdvisor:
         workout_category: str = "Full Body"
     ) -> str:
         """
-        [MODIFIED] Builds the entire system prompt, incorporating Master Prompt rules.
+        [FIX 2 Implementation Note] Builds the entire system prompt. The LLM is forced 
+        to use the dummy calorie value, which is later corrected by the Python function.
         """
         
         # --- DYNAMIC VALUE EXTRACTION ---
@@ -894,16 +943,8 @@ class FitnessAdvisor:
         allowed_equipment = ', N/A'.join(equipment_list)
         
         # Fitness Level Constraint Logic (Rule 3.B)
-        # Using a more direct, structured rule set for the LLM based on the Master Prompt.
-        level_rules_master_prompt = ""
-        if fitness_level == "Beginner (0–6 months)":
-            level_rules_master_prompt = "BEGINNER: Must focus on low-impact, supported, and simple bodyweight movements (e.g., Chair Squat, Glute Bridge, Wall Push-up, Band Rows). AVOID: Burpees, Jumps, Barbells, Pistol Squats, HIIT/Sprints."
-        elif fitness_level == "Intermediate (6 months–2 years)":
-            level_rules_master_prompt = "INTERMEDIATE: Focus on foundational strength, moderate resistance, and compound movements (e.g., Goblet Squat, Lunges, Incline Push-up, Planks). AVOID: Advanced plyometrics, heavy barbell work, Olympic lifts."
-        elif fitness_level == "Advanced (2+ years)":
-            level_rules_master_prompt = "ADVANCED: Focus on maximizing intensity, heavy loads, and specialized training (e.g., Loaded Squats, Deadlifts, Pull-ups, HIIT). AVOID: Olympic lifts unless explicitly requested, and apply general safety rules."
-
-
+        level_rules = TRAINING_LEVELS[fitness_level]['rules']
+        
         # Location and Equipment Rule 
         equipment_rule = f"WORKOUT LOCATION is {location}. Exercises MUST align with the environment. If 'Home', limit to bodyweight, dumbbells, bands, or TRX. If 'Gym', include machines, barbells, and cables. If 'Outdoor', prioritize walk, jog, step-ups, mobility drills, or bodyweight exercises."
         
@@ -919,7 +960,7 @@ class FitnessAdvisor:
         
         if bmi > 30:
             advanced_avoid_exercises.extend([
-                "High Impact Jumps", "Fast Tempo/Ballistic Movements", "Deep Spinal Flexion/Extension", "Floor Transitions", "Deep Hinging"
+                "High Impact Jumps", "Fast Tempo/Ballistic Movements", "Deep Spinal Flexion/Extension"
             ])
             safety_priority_note += (" " if safety_priority_note else "") + "BMI PRIORITY (≥ 30): Emphasize low-impact exercises and gradual progression."
             
@@ -965,11 +1006,10 @@ class FitnessAdvisor:
         
         # --- BUILD FINAL PROMPT STRING ---
         
-        # Merged the General Principles and Internal Reasoning Rule into the primary instruction block
+        # Removed calorie reference as it is calculated in Python
         
         prompt_parts = [
-            "You are FriskaAI, an ACSM-CEP certified clinical exercise physiologist. You MUST generate safe, accurate, level-appropriate workout plans strictly following the rules below. Your core principles are: **Safety, Functionality, Level-appropriate Complexity, User Goal Alignment, Low-Impact to High-Impact Progression, and Balanced Movement Patterns.**",
-            "You MUST prioritize **maximum exercise variety** and **avoiding consecutive-day muscle group work**.",
+            "You are FriskaAI, an ACSM ,You are a certified fitness coach and corrective exercise specialist.. You MUST prioritize **maximum exercise variety** and **avoiding consecutive-day muscle group work**.",
             "Your ONLY output must be a single JSON object following the schema provided below.",
             "Never include text outside the JSON. Never add comments.",
             "",
@@ -977,8 +1017,9 @@ class FitnessAdvisor:
             json.dumps({
                 "day_name": "string",
                 "warmup_duration": "5-7 minutes",
-                "main_workout_category": "string (Example: Upper Body Strength, Full Body Metabolic, Core Stability)", # UPDATED instruction for title
-                "cooldown_duration": "5-7 minutes",
+                # [UPDATE 1]: Changed description to encourage clearer non-jargon titles.
+                "main_workout_category": "string (Example: Upper Body Strength, Full Body Circuit, Lower Body Endurance, Core Stability. Use clear, descriptive non-jargon terms)",
+                    "cooldown_duration": "5-7 minutes",
                     "warmup": [
                     {
                         "name": "string",
@@ -989,8 +1030,9 @@ class FitnessAdvisor:
                         "intensity_rpe": "RPE 1-3",
                         "rest": "15 seconds",
                         "equipment": "string",
-                        # LLM MUST ONLY PROVIDE A DUMMY VALUE/FORMAT. PYTHON WILL REPLACE THIS.
-                        "est_calories": "Est: 0 Cal (MET: 0.0)" 
+                        # LLM MUST ONLY PROVIDE A DUMMY VALUE/FORMAT. PYTHON WILL REPLACE THIS WITH ACCURATE CALCULATION.
+                        "est_calories": "Est: 0 Cal (MET: 0.0)",
+                        "safety_cue": "string (Mandatory: Provide a specific form tip or safety point for THIS exercise)" # REINFORCED MANDATE
                     }
                 ],
                 "main_workout": [
@@ -1003,8 +1045,9 @@ class FitnessAdvisor:
                         "intensity_rpe": f"RPE {target_rpe}",
                         "rest": target_rest_desc,
                         "equipment": "string",
-                         # LLM MUST ONLY PROVIDE A DUMMY VALUE/FORMAT. PYTHON WILL REPLACE THIS.
-                        "est_calories": "Est: 0 Cal (MET: 0.0)"
+                         # LLM MUST ONLY PROVIDE A DUMMY VALUE/FORMAT. PYTHON WILL REPLACE THIS WITH ACCURATE CALCULATION.
+                        "est_calories": "Est: 0 Cal (MET: 0.0)",
+                        "safety_cue": "string (Mandatory: Provide a specific form tip or safety point for THIS exercise)" # REINFORCED MANDATE
                     }
                 ],
                 "cooldown": [
@@ -1016,9 +1059,10 @@ class FitnessAdvisor:
                         "hold": "string (e.g., 30-60 seconds / side)",
                         "intensity_rpe": "RPE 1-3",
                         "rest": "15 seconds",
-                        # LLM MUST ONLY PROVIDE A DUMMY VALUE/FORMAT. PYTHON WILL REPLACE THIS.
+                        # LLM MUST ONLY PROVIDE A DUMMY VALUE/FORMAT. PYTHON WILL REPLACE THIS WITH ACCURATE CALCULATION.
                         "equipment": "string",
-                        "est_calories": "Est: 0 Cal (MET: 0.0)"
+                        "est_calories": "Est: 0 Cal (MET: 0.0)",
+                        "safety_cue": "string (Mandatory: Provide a specific form tip or safety point for THIS exercise)" # REINFORCED MANDATE
                     }
                 ],
                 "safety_notes": ["3-5 strings"]
@@ -1030,35 +1074,36 @@ class FitnessAdvisor:
             "",
             "# 3. RESTRICTION RULES (DYNAMICALLY INJECTED)",
             f"- Current Day: **{day_name}** | Fitness Level/Experience: **{fitness_level}**", # Updated level reference
-            f"- **FITNESS LEVEL MANDATE (Master Prompt Rule):** {level_rules_master_prompt}",
+            f"- Fitness Level Constraints: **{level_rules}**",
             f"- Training Consistency Rule: **{repetition_rule}**", 
             f"- Equipment & Location Rule: **{equipment_rule}**. Strictly use only these equipment options: **{allowed_equipment}**", 
-            f"- **STRICT EXERCISE NAME AVOIDANCE (All Previous Days):** DO NOT use these specific exercise names in ANY section: **{', '.join(exercises_to_avoid_list) if exercises_to_avoid_list else 'None'}**. Apply the **Master Prompt ANTI-REPETITION RULES** (no renamed duplicates, use legitimate variations only).", 
+            f"- **STRICT EXERCISE NAME AVOIDANCE (All Previous Days):** DO NOT use these specific exercise names in ANY section: **{', '.join(exercises_to_avoid_list) if exercises_to_avoid_list else 'None'}**", 
             f"- **STRICT PATTERN AVOIDANCE (Recovery Constraint from last 3 days):** To ensure muscle group recovery and maximize variety, prioritize movements NOT listed here: **{', '.join(patterns_to_avoid_list) if patterns_to_avoid_list else 'None/Minor Muscle Groups Only'}**",
-            f"- Medical and Safety Restrictions: **{final_medical_restrictions}**. Apply **Master Prompt Demographics & Medical Rules** (e.g., for Age ≥ 60, BMI ≥ 30, and Female considerations).", 
+            f"- Medical and Safety Restrictions: **{final_medical_restrictions}**", 
             f"- Physical limitations: **{user_profile.get('physical_limitation', 'None')}**",
-            f"- **Master Prompt Substitution Rule:** If an exercise is too advanced, unsafe, or equipment is unavailable, **immediately replace it with a safer alternative**. Use only exercises from your verified fitness knowledge—**never invent unrealistic exercises.**",
             "",
             "# 4. REQUIRED EXERCISE STRUCTURE",
             f"- Session Duration Breakdown: **{duration_breakdown}** (For pacing guidance)", 
             f"- Warmup: exactly 3 exercises. MUST use the **'reps'** field for dynamic movements, not 'duration'.",
-            f"- **Warmup Structure Mandate (CRITICAL VARIATION):** The 3 exercises MUST follow this order and focus. Exercise names MUST be varied across different training days (e.g., use Cat-Cow Stretch, Seated Glute Stretch, or Wall Chest Stretch instead of generic 'Stretch'). **AVOID repeating:** Arm Circles, Standing Hip Swings, Low-Impact High Knees, Scapular Push-Ups, Thoracic Rotations.",
-            "   1. Cardio Type Exercise (e.g., Low-Impact High Knees, Jumping Jacks). This exercise MUST account for **90 seconds (1.5 minutes)** of the total duration. The duration MUST be used in the calorie calculation.",
-            "   2. Upper Body Dynamic Stretch/Mobility. The duration for this should be treated as **30 seconds** for calculation.",
-            "   3. Lower Body Dynamic Stretch/Mobility. The duration for this should be treated as **30 seconds** for calculation.",
-            f"- Cooldown: exactly 3 exercises. Exercise names MUST be varied across different training days. **AVOID repeating:** Seated Glute Stretch, Wall Chest Stretch, Deep Diaphragmatic Breathing, Standing Quad Stretch, Hamstring Floor Stretch.",
-            f"- Main workout: exactly {max_main_exercises} exercises. **All main exercises must be unique from each other and the warm-up/cool-down.**",
+            f"- **Warmup Structure Mandate (CRITICAL VARIATION):** The 3 exercises MUST follow this order and focus.If any exercises are performed in both side (left/right) then it should show either sec/side or rep/side in reps. Exercise names MUST be varied across different training days (e.g., use Cat-Cow Stretch, Seated Glute Stretch, or Wall Chest Stretch instead of generic 'Stretch'). **AVOID repeating:** Arm Circles, Standing Hip Swings, Low-Impact High Knees, Scapular Push-Ups, Thoracic Rotations.",
+            "   1. Cardio Type Exercise (e.g., Low-Impact High Knees, Modified Jumping Jacks, Spot Walking/Marching). This exercise MUST account for **90 seconds (1.5 minutes)** of the total duration. The duration MUST be used in the calorie calculation.",
+            "   2. Upper Body Dynamic Stretch/Mobility. The duration for this should be treated as **10-15 reps** for calculation.",
+            "   3. Lower Body Dynamic Stretch/Mobility. The duration for this should be treated as **10-15 reps** for calculation.",
+            f"- Cooldown: exactly 3 static stretches/exercises.Exercises/Static Stretches MUST related to the main workout.The duration for this should be treated as **15-30 sec**.If any exercises are performed in both side (left/right) then it should show either sec/side or rep/side in reps. Exercise names MUST be varied across different training days. **AVOID repeating:** (same exercises) (eg.Seated Glute Stretch, Wall Chest Stretch, Deep Diaphragmatic Breathing, Standing Quad Stretch, Hamstring Floor Stretch, shoulder static stretch)",
+            f"- Main workout: exactly {max_main_exercises} exercises. **All main exercises must be unique from each other and the warm-up/cool-down.All exercises are standerd not modified.**",
             f"- **Movement Focus Mandate:** {required_structure}", # UPDATED: Use dynamic structure based on body parts
             "",
             "# 5. SAFETY & GOAL MANDATES (CRITICAL CALORIE GUIDANCE)",
             f"- Intensity: Main workout RPE must be **{target_rpe}** | Warmup/Cooldown RPE must be **RPE 1-3**.",
             "- **IMPORTANT:** The Calorie (MET) calculation is handled externally by a Python function. Focus solely on generating highly relevant and safe exercise routines according to the rules above. Use a default 'Est: 0 Cal (MET: 0.0)' in your JSON output for the `est_calories` field.",
+            f"- **CRITICAL MANDATE: SAFETY CUE:** Every single exercise object (warmup, main, cooldown) MUST include a specific and concise instruction in the `safety_cue` field related to form, balance, or injury prevention for that particular exercise. DO NOT leave it blank.", # STRONGER MANDATE
             f"- **STRICT MAIN WORKOUT REPS RULE (Standard):** All Main workout exercises MUST be in **Reps: {target_reps}** (e.g., 10-15). **DO NOT** use a 'duration' or 'hold' field in the 'main_workout' section for non-isometric exercises.",
             f"- **SPECIAL ISOMETRIC REPS RULE (Plank/Wall Sit):** For static holds (like Plank, Wall Sit) in the **main_workout** section, the 'reps' field MUST represent the hold time, for example: '**30-45 seconds (or max hold)**'.",
             f"- **BI-LATERAL REPS CLARIFICATION:** For any exercise performed one side at a time (e.g., Lunges, Single-Arm Row, Side Plank), the 'reps' value MUST clearly indicate per side (e.g., '10-12 / side' or '10-12 each leg').",
             f"- **STATIC HOLD SCALING:** All static holds (planks, stretches, stability drills) MUST use a hold time appropriate for the user's level, which is a maximum of **{current_level_hold}** total duration. For exercises requiring two sides (e.g., side plank, stretches), split the duration evenly.",
             f"- Reps/Sets: Main workout sets/reps must be **Sets: {target_sets}, Reps: {target_reps}**.",
             "- Never exceed user equipment.",
+            "- Prioritize stability for Beginner level users and BMI > 30.",
             "- Safety Notes must include:",
             "   1. One top-priority safety tip for conditions/limitation.",
             "   2. One 'Progression Tip: ...' (Mandatory for next week's plan).",
@@ -1067,7 +1112,7 @@ class FitnessAdvisor:
             "# 6. OUTPUT RULES",
             "- Output **only** valid JSON.",
             "- **NO** markdown outside the single ```json block.",
-            "- **NO** text, explanation, or commentary. **Do NOT** include any internal reasoning or substitution text. ONLY the final JSON.",
+            "- **NO** text, explanation, or commentary.",
             "",
             "```json"
         ]
@@ -1114,6 +1159,9 @@ class FitnessAdvisor:
         if user_profile.get("fitness_level") == "Beginner (0–6 months)" or user_profile.get("age", 30) >= 50 or user_profile.get("bmi", 22) > 30:
              target_reps = "8-12" 
         
+        # [FIX 2 Implementation Note] Generate fallback JSON using the dummy calorie value
+        # This plan will still be passed through _convert_plan_to_markdown_enhanced, 
+        # where the actual calorie calculation will overwrite the dummy value.
         fallback_plan_json = self._generate_fallback_plan_json(
             user_profile, 
             day_name, 
@@ -1178,6 +1226,7 @@ class FitnessAdvisor:
                 progression_tip = self._extract_and_move_progression_tip(plan_json)
                 
                 # IMPORTANT: Use the enhanced markdown conversion here which performs the calorie calculation
+                # This call modifies the `plan_json` in place with the correct `est_calories` value.
                 plan_md = self._convert_plan_to_markdown_enhanced(plan_json, user_profile)
                 
                 return {
@@ -1197,6 +1246,7 @@ class FitnessAdvisor:
                     pass
 
         # If all attempts fail, return the fallback plan with the final error message
+        # The fallback plan's JSON is passed to the markdown converter, where calories are calculated and fixed.
         return {
             "success": False,
             "plan_json": fallback_plan_json,
@@ -1206,7 +1256,11 @@ class FitnessAdvisor:
         }
     
     def _generate_fallback_plan_json(self, user_profile: Dict, day_name: str, day_focus: str, sets: str, reps: str, rest: str) -> Dict:
-        """Generate simple fallback plan as a JSON object with required structure and updated exercises."""
+        """
+        [FIX 2 Implementation] Generate simple fallback plan as a JSON object with required structure. 
+        Uses the dummy calorie value for consistency with the LLM's required output, 
+        as this value will be correctly overwritten by Python's calculation later.
+        """
         
         exercise_count = int(self._determine_exercise_count(user_profile.get("session_duration", "30-45 minutes"), user_profile.get("fitness_level", "Beginner (0–6 months)")))
         
@@ -1219,6 +1273,9 @@ class FitnessAdvisor:
             "Repeat for the specified repetitions or duration."
         ]
         
+        # Fallback dummy calorie value (will be overwritten by Python calculation later in _convert_plan_to_markdown_enhanced)
+        DUMMY_CALORIE_VALUE = "Est: 0 Cal (MET: 0.0)"
+        
         # Ensure 3-5 steps are formal and complete in the fallback
         base_exercises = [
             {
@@ -1230,8 +1287,8 @@ class FitnessAdvisor:
                 "intensity_rpe": "RPE 4-6",
                 "rest": rest,
                 "equipment": "Wall",
-                "safety_cue": "Ensure feet are far enough back to feel a challenge in the chest and arms.",
-                "est_calories": "Est: 15 Cal (MET: 3.5)" # Fallback using generic MET
+                "safety_cue": "Keep your body in a straight line from head to heels; avoid sinking your hips.", # FIXED
+                "est_calories": DUMMY_CALORIE_VALUE # Use dummy value for consistency, will be overwritten
             },
             {
                 "name": "Single-Arm Dumbbell Row",
@@ -1242,8 +1299,8 @@ class FitnessAdvisor:
                 "intensity_rpe": "RPE 4-6",
                 "rest": rest,
                 "equipment": "Dumbbell, Bench/Chair",
-                "safety_cue": "Maintain a tall, upright posture and pull with your back, not just your arm.",
-                "est_calories": "Est: 20 Cal (MET: 5.0)" # Fallback using generic MET
+                "safety_cue": "Maintain a tall, upright posture and pull with your back, not just your arm. Protect your lower back by bracing your core.", # FIXED
+                "est_calories": DUMMY_CALORIE_VALUE # Use dummy value for consistency, will be overwritten
             },
             {
                 "name": "Chair Squats (Standard)",
@@ -1254,8 +1311,8 @@ class FitnessAdvisor:
                 "intensity_rpe": "RPE 4-6",
                 "rest": rest,
                 "equipment": "Chair",
-                "safety_cue": "Keep knees tracking directly over your feet; do not let them cave inward.",
-                "est_calories": "Est: 25 Cal (MET: 4.0)" # Fallback using generic MET
+                "safety_cue": "Keep knees tracking directly over your feet; do not let them cave inward. Sit back, not down, keeping chest upright.", # FIXED
+                "est_calories": DUMMY_CALORIE_VALUE # Use dummy value for consistency, will be overwritten
             },
             {
                 "name": "Plank (Standard Isometric Hold)",
@@ -1266,8 +1323,8 @@ class FitnessAdvisor:
                 "intensity_rpe": "RPE 4-6",
                 "rest": rest,
                 "equipment": "Yoga Mat",
-                "safety_cue": "Keep the spine neutral, maintain a straight line from head to heels, and do not let the hips drop.",
-                "est_calories": "Est: 10 Cal (MET: 3.0)" # Fallback using generic MET
+                "safety_cue": "Keep the spine neutral, maintain a straight line from head to heels, and do not let the hips drop or raise too high.", # FIXED
+                "est_calories": DUMMY_CALORIE_VALUE # Use dummy value for consistency, will be overwritten
             },
              {
                 "name": "Standing Overhead Band Tricep Extension",
@@ -1278,8 +1335,8 @@ class FitnessAdvisor:
                 "intensity_rpe": "RPE 4-6",
                 "rest": rest,
                 "equipment": "Resistance Band",
-                "safety_cue": "Keep elbows fixed close to your head; avoid flaring them out and use slow, controlled tempo.",
-                "est_calories": "Est: 15 Cal (MET: 3.5)" # Fallback using generic MET
+                "safety_cue": "Keep elbows fixed close to your head; avoid flaring them out. If you feel any sharp pain, stop immediately.", # FIXED
+                "est_calories": DUMMY_CALORIE_VALUE # Use dummy value for consistency, will be overwritten
             }
         ]
         
@@ -1291,15 +1348,21 @@ class FitnessAdvisor:
         
         warmup = [
             # Fallback exercise is Low-Impact High Knees
-            {"name": "Low-Impact High Knees (Cardio Warmup)", "benefit": "Elevates heart rate and activates core/legs without jumping (1-2 min duration).", "steps": generic_steps, "sets": "1", "reps": "60-120 (Reps to equate to 1-2 min)", "intensity_rpe": "RPE 1-2", "rest": "15 seconds", "equipment": "Bodyweight", "safety_cue": "Focus on lifting the knees gently; ensure feet land softly and maintain a steady rhythm.", "est_calories": "Est: 10 Cal (MET: 3.0)"}, 
-            {"name": "Arm Circles (Upper Body Dynamic Stretch)", "benefit": "Increases shoulder joint range of motion and blood flow.", "steps": generic_steps, "sets": "1", "reps": "15 forward, 15 backward", "intensity_rpe": "RPE 1-2", "rest": "15 seconds", "equipment": "Bodyweight, Chair (if needed)", "safety_cue": "Keep core engaged and maintain small, controlled circles initially.", "est_calories": "Est: 5 Cal (MET: 2.0)"}, 
-            {"name": "Standing Hip Swings (Lower Body Dynamic Stretch)", "benefit": "Improves dynamic flexibility in the hips and hamstrings.", "steps": generic_steps, "sets": "1", "reps": "10 / side", "intensity_rpe": "RPE 1-2", "rest": "15 seconds", "equipment": "Bodyweight, Wall (for support)", "safety_cue": "Use a wall for balance; control the swing and do not force the range of motion.", "est_calories": "Est: 5 Cal (MET: 2.5)"}
+            {"name": "Low-Impact High Knees (Cardio Warmup)", "benefit": "Elevates heart rate and activates core/legs without jumping (1-2 min duration).", "steps": generic_steps, "sets": "1", "reps": "60-120 (Reps to equate to 1-2 min)", "intensity_rpe": "RPE 1-2", "rest": "15 seconds", "equipment": "Bodyweight", "safety_cue": "Focus on lifting the knees gently; ensure feet land softly and maintain a steady rhythm. Avoid leaning back.", # FIXED
+             "est_calories": DUMMY_CALORIE_VALUE}, 
+            {"name": "Arm Circles (Upper Body Dynamic Stretch)", "benefit": "Increases shoulder joint range of motion and blood flow.", "steps": generic_steps, "sets": "1", "reps": "15 forward, 15 backward", "intensity_rpe": "RPE 1-2", "rest": "15 seconds", "equipment": "Bodyweight, Chair (if needed)", "safety_cue": "Keep core engaged and maintain small, controlled circles initially. Only move arms in a pain-free range.", # FIXED
+             "est_calories": DUMMY_CALORIE_VALUE}, 
+            {"name": "Standing Hip Swings (Lower Body Dynamic Stretch)", "benefit": "Improves dynamic flexibility in the hips and hamstrings.", "steps": generic_steps, "sets": "1", "reps": "10 / side", "intensity_rpe": "RPE 1-2", "rest": "15 seconds", "equipment": "Bodyweight, Wall (for support)", "safety_cue": "Use a wall for balance; control the swing and do not force the range of motion. Keep the standing knee slightly soft.", # FIXED
+             "est_calories": DUMMY_CALORIE_VALUE}
         ]
         
         cooldown = [
-            {"name": "Seated Glute Stretch (Figure-4)", "benefit": "Deep stretch for the gluteal muscles and lower back relief.", "steps": generic_steps, "sets": "1", "hold": f"{current_level_hold} per leg", "intensity_rpe": "RPE 1-3", "rest": "15 seconds", "equipment": "Chair", "safety_cue": "Keep the spine straight; lean forward from the hips until a gentle stretch is felt.", "est_calories": "Est: 5 Cal (MET: 2.0)"}, 
-            {"name": "Wall Chest Stretch", "benefit": "Opens the chest and improves shoulder posture.", "steps": generic_steps, "sets": "1", "hold": f"{current_level_hold} per arm", "intensity_rpe": "RPE 1-3", "rest": "15 seconds", "equipment": "Wall", "safety_cue": "Gently rotate away from the wall; avoid straining the shoulder capsule.", "est_calories": "Est: 5 Cal (MET: 2.0)"}, 
-            {"name": "Deep Diaphragmatic Breathing", "benefit": "Calms the nervous system and aids muscle recovery.", "steps": generic_steps, "sets": "1", "hold": "2 minutes (slow, controlled breaths)", "intensity_rpe": "RPE 1-3", "rest": "15 seconds", "equipment": "Bodyweight", "safety_cue": "Breathe into your belly, not your chest. Keep shoulders relaxed.", "est_calories": "Est: 5 Cal (MET: 1.5)"} 
+            {"name": "Seated Glute Stretch (Figure-4)", "benefit": "Deep stretch for the gluteal muscles and lower back relief.", "steps": generic_steps, "sets": "1", "hold": f"{current_level_hold} per leg", "intensity_rpe": "RPE 1-3", "rest": "15 seconds", "equipment": "Chair", "safety_cue": "Keep the spine straight; lean forward from the hips until a gentle stretch is felt. Never bounce or over-stretch.", # FIXED
+             "est_calories": DUMMY_CALORIE_VALUE}, 
+            {"name": "Wall Chest Stretch", "benefit": "Opens the chest and improves shoulder posture.", "steps": generic_steps, "sets": "1", "hold": f"{current_level_hold} per arm", "intensity_rpe": "RPE 1-3", "rest": "15 seconds", "equipment": "Wall", "safety_cue": "Gently rotate away from the wall; avoid straining the shoulder capsule. Keep the shoulder below the point of pain.", # FIXED
+             "est_calories": DUMMY_CALORIE_VALUE}, 
+            {"name": "Deep Diaphragmatic Breathing", "benefit": "Calms the nervous system and aids muscle recovery.", "steps": generic_steps, "sets": "1", "hold": "2 minutes (slow, controlled breaths)", "intensity_rpe": "RPE 1-3", "rest": "15 seconds", "equipment": "Bodyweight", "safety_cue": "Breathe into your belly, not your chest. Keep shoulders relaxed and fully focus on the breath.", # FIXED
+             "est_calories": DUMMY_CALORIE_VALUE} 
         ]
 
         return {
@@ -1405,23 +1468,28 @@ def initialize_session_state():
 def calculate_performance_calorie_burn(exercise_index: str, day_name: str, advisor: FitnessAdvisor, weight_kg: float) -> float:
     """
     Calculates the real-time calorie burn based on logged sets and 
-    the LLM's *estimated* calories, broken down per planned unit.
+    the actual MET rate, as requested by the user, using the formula
+    Calories = (MET * Weight_KG * 3.5) / 200 * (Duration in minutes).
     """
     
     logged_data = st.session_state.logged_performance.get(day_name, {}).get(exercise_index, {})
     actual_sets = logged_data.get('actual_sets', 0)
-    actual_units_per_set = logged_data.get('actual_reps', 0) # This is the logged reps/seconds per set
+    # Note: actual_reps is either reps for strength or seconds for time-based/cardio
+    actual_units_per_set = logged_data.get('actual_reps', 0) 
     
-    if actual_sets == 0 or actual_units_per_set == 0:
+    # 1. Basic checks
+    if actual_sets <= 0 or actual_units_per_set <= 0 or weight_kg <= 0:
         return 0.0
 
     plan = st.session_state.all_json_plans.get(day_name)
-    if not plan:
+    profile = st.session_state.user_profile
+    if not plan or not profile:
         return 0.0
 
-    # Find the exercise data 
+    # 2. Find the exercise data and section type
     ex_data = None
     section_map = {'warmup': plan.get('warmup', []), 'main': plan.get('main_workout', []), 'cooldown': plan.get('cooldown', [])}
+    section_key = None
     
     try:
         section_key, idx = exercise_index.split('_')
@@ -1434,26 +1502,57 @@ def calculate_performance_calorie_burn(exercise_index: str, day_name: str, advis
 
     if not ex_data:
         return 0.0
+        
+    exercise_name = ex_data.get('name', 'Unknown Exercise')
+    fitness_level = profile.get('fitness_level', "Beginner (0–6 months)")
 
-    # Retrieve stored planned data (stored during _convert_plan_to_markdown_enhanced)
-    # Calorie number comes DIRECTLY from the Python-parsed value.
-    planned_total_cal = ex_data.get('planned_total_cal', 0)
-    planned_total_units = ex_data.get('planned_total_units', 1)
+    # 3. Determine MET value based on the exercise and user level
+    # Use the stored MET value if available, otherwise look it up again (robustness)
+    met_value = ex_data.get('met_value') 
+    if not met_value:
+         met_value = advisor._get_met_value(exercise_name, fitness_level) 
     
-    if planned_total_cal <= 0 or planned_total_units <= 0:
+    if met_value <= 0:
+        # Fallback to a safe general MET if lookup fails
+        met_value = 3.0
+        
+    # 4. Determine total duration in minutes based on ACTUAL performance
+    
+    total_seconds = 0.0
+    
+    # Check if the exercise is time-based (hold/cooldown/cardio warmup)
+    name_lower = exercise_name.lower()
+    
+    is_time_based_exercise = False
+    if section_key == 'cooldown':
+        is_time_based_exercise = True
+    # Check main/warmup for explicit time-based descriptions
+    elif ('hold' in name_lower or 'second' in name_lower or 'minute' in name_lower):
+        is_time_based_exercise = True
+    # Special check for warmup cardio (which is logged in seconds)
+    elif section_key == 'warmup' and ('march' in name_lower or 'jog' in name_lower or 'jack' in name_lower or 'cardio' in name_lower):
+         is_time_based_exercise = True
+
+    if is_time_based_exercise:
+        # If it's time-based, actual_units_per_set is the duration in seconds per set
+        total_seconds = actual_sets * actual_units_per_set
+    else:
+        # If it's rep-based, estimate time per rep (5 seconds is a conservative estimate for strength/dynamic)
+        # 5 seconds per rep (assuming 3-1-1 tempo)
+        estimated_seconds_per_set = (actual_units_per_set * 5)
+        total_seconds = actual_sets * estimated_seconds_per_set
+        
+    total_minutes = total_seconds / 60.0
+
+    # 5. Apply the Calorimetry Formula
+    # Formula: Calories = (MET * Weight_KG * 3.5) / 200 * Minutes
+    
+    if total_minutes == 0:
         return 0.0
 
-    # Calculate calorie per planned unit (the breakdown rate)
-    cal_per_planned_unit = planned_total_cal / planned_total_units
+    estimated_calories = (met_value * weight_kg * 3.5) / 200 * total_minutes
     
-    # Calculate total actual units performed: (Actual Sets * Actual Units per Set)
-    # Note: For time-based warmups/holds, 'actual_reps' input is treated as seconds.
-    total_actual_units = actual_sets * actual_units_per_set
-    
-    # Calculate performance-based burn
-    total_calories = cal_per_planned_unit * total_actual_units
-    
-    return max(0.0, total_calories)
+    return max(0.0, estimated_calories)
 
 def display_interactive_workout_day(day_name: str, plan_json: Dict, profile: Dict, advisor: FitnessAdvisor):
     """Dynamically renders the workout plan with interactive logging."""
@@ -1468,7 +1567,7 @@ def display_interactive_workout_day(day_name: str, plan_json: Dict, profile: Dic
         st.session_state.logged_performance[day][ex_id]['actual_sets'] = max(0, st.session_state.logged_performance[day][ex_id]['actual_sets'] + delta)
 
     def render_section(section_data: List[Dict], section_title: str, section_key: str):
-        st.markdown(f"## 🤸 {section_title} ({plan_json.get(f'{section_key}_duration', 'N/A')})")
+        st.markdown(f"## 🤸 {section_title} ")
         
         for idx, exercise in enumerate(section_data):
             # Unique identifier for the exercise in session state
@@ -1522,6 +1621,7 @@ def display_interactive_workout_day(day_name: str, plan_json: Dict, profile: Dic
             planned_col5.markdown(f"<div class='planned-metrics'><p><strong>Equipment:</strong> {exercise.get('equipment', 'N/A')}</p></div>", unsafe_allow_html=True)
             
             st.markdown(f"*{exercise.get('benefit', 'N/A')}*")
+            # FIX: Display Safety Cue here.
             st.markdown(f"> **Safety Cue:** *{exercise.get('safety_cue', 'N/A')}*")
 
             # 2. Logging Row for Actual Performance
@@ -1551,7 +1651,7 @@ def display_interactive_workout_day(day_name: str, plan_json: Dict, profile: Dic
             current_units = st.session_state.logged_performance[day_name][ex_id]['actual_reps']
             
             # Units display and input
-            # [CRITICAL FIX] Use the dedicated calorie rate function to get the correct unit (Rep or Sec)
+            # Use the dedicated calorie rate function to get the correct unit (Rep or Sec)
             rate_per_unit, rate_unit = advisor._calculate_calorie_rate(exercise.get('name', ''), weight_kg)
             
             # If the exercise is the FIRST cardio warmup, enforce SECONDS for logging and default to 90
@@ -1583,15 +1683,25 @@ def display_interactive_workout_day(day_name: str, plan_json: Dict, profile: Dic
                 st.session_state.logged_performance[day_name][ex_id]['actual_reps'] = new_units
                 # Since Streamlit reruns on interaction, the calorie calculation will pick up the new value automatically.
 
-            # --- Calorie Burn Display ---
+            # --- Calorie Burn Display (UPDATED RATE CALCULATION) ---
             total_cal = calculate_performance_calorie_burn(ex_id, day_name, advisor, weight_kg)
             
-            # Calculate Rate per unit for display only
-            # Use the stored planned calorie total divided by the planned units (in seconds for cardio/holds)
-            planned_cal_per_unit = exercise.get('planned_total_cal', 0) / exercise.get('planned_total_units', 1)
+            # Determine the MET value and calculate the rate per unit based on the type of unit (Rep or Sec)
+            met_value = exercise.get('met_value', advisor._get_met_value(exercise.get('name', ''), profile.get('fitness_level', "Beginner (0–6 months)")))
             
+            # Formula: Cal/Minute = (MET * Weight_KG * 3.5) / 200
+            cal_per_minute = (met_value * weight_kg * 3.5) / 200
+            cal_per_unit_rate = 0.0
+            if rate_unit == "Sec":
+                # If the unit is seconds, the rate is Cal/minute / 60
+                cal_per_unit_rate = cal_per_minute / 60
+            elif rate_unit == "Rep":
+                # If the unit is reps, the rate is Cal/minute * (estimated seconds per rep / 60 seconds)
+                # We estimate 5 seconds per rep for strength/dynamic movements
+                cal_per_unit_rate = (cal_per_minute * 5) / 60 
+
             col_log_cal.markdown(f"**🔥 Performance Burn**")
-            col_log_cal.info(f"**{round(total_cal)} Cal** (Rate Est: {planned_cal_per_unit:.2f} Cal/{rate_unit})")
+            col_log_cal.info(f"**{round(total_cal)} Cal** (Rate Est: {cal_per_unit_rate:.2f} Cal/{rate_unit})")
             
             # Display Steps (Always display steps below the logging)
             with st.expander("Show Detailed Steps"):
@@ -1970,42 +2080,51 @@ def main():
     else:
         profile = st.session_state.user_profile
         
-        st.markdown(f"👋 Welcome, **{profile.get('name', 'User')}**!")
-        st.markdown(f"Your Personalized Fitness Plan is Ready")
-        st.markdown(f"📅 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 🎯 Goal: **{profile.get('primary_goal', 'N/A')}** | 💪 Level: **{profile.get('fitness_level', 'N/A')}**")
+        # FIX: Ensure best_tip has a safe default value if no plans have been generated yet.
+        days = profile.get('days_per_week', [])
+        best_tip = "Complete the form and generate your plan to see your focus for next week."
+        if days:
+            best_tip = st.session_state.all_progression_tips.get(days[-1], "Focus on maintaining consistent activity and improving form.") 
         
-        st.markdown("\n")
-        
-        if profile.get('physical_limitation'):
-            st.warning(f"⚠️ **Accommodated Limitations:** {profile['physical_limitation']}")
-        
-        # FIX: Use .get() with a default value to prevent KeyError on initial load
-        specific_avoidance_text = profile.get('specific_avoidance', 'None')
-        if specific_avoidance_text != 'None':
-             st.warning(f"⚠️ **Specific Avoidance:** Exercises avoided involving: {specific_avoidance_text}")
-        
-        st.markdown("---")
-        
-        # Display plans
-        st.markdown("## 📅 Your Weekly Workout Schedule (Interactive Log)")
-        st.markdown("Log your actual sets and reps/seconds performed to get a real-time calorie burn calculation.")
-        
-        for idx, day in enumerate(profile.get('days_per_week', [])):
-            with st.expander(f"📋 {day} Workout Log", expanded=True if idx == 0 else False):
+        if st.session_state.fitness_plan_generated:
+            st.markdown(f"👋 Welcome, **{profile.get('name', 'User')}**!")
+            st.markdown(f"Your Personalized Fitness Plan is Ready")
+            st.markdown(f"📅 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 🎯 Goal: **{profile.get('primary_goal', 'N/A')}** | 💪 Level: **{profile.get('fitness_level', 'N/A')}**")
+            
+            st.markdown("\n")
+            
+            if profile.get('physical_limitation'):
+                st.warning(f"⚠️ **Accommodated Limitations:** {profile['physical_limitation']}")
+            
+            # FIX: Use .get() with a default value to prevent KeyError on initial load
+            specific_avoidance_text = profile.get('specific_avoidance', 'None')
+            if specific_avoidance_text != 'None':
+                 st.warning(f"⚠️ **Specific Avoidance:** Exercises avoided involving: {specific_avoidance_text}")
+            
+            st.markdown("---")
+
+
+            # Display plans
+            st.markdown("## 📅 Your Weekly Workout Schedule ")
+            st.markdown("Log your actual sets and reps/seconds performed to get a real-time calorie burn calculation.")
+            
+            for idx, day in enumerate(profile.get('days_per_week', [])):
                 if day in st.session_state.all_json_plans and st.session_state.all_json_plans[day]:
                     plan_json = st.session_state.all_json_plans[day]
                     
-                    # [UPDATE 1] Day-wise Workout Title
-                    day_title = f"{day} - {plan_json.get('main_workout_category', 'N/A')}"
+                    # [UPDATE 1] Day-wise Workout Title Fix: Use the day and the category for a descriptive title
+                    day_title = f"{day} - {plan_json.get('main_workout_category', 'Workout')}" 
                     
-                    st.markdown(f"### **{day_title}**") # Display the dynamic day title
-                    
-                    # NEW INTERACTIVE DISPLAY
-                    display_interactive_workout_day(day, plan_json, profile, advisor) 
-                    
-                    # If it was a fallback plan, show the error message
-                    if not st.session_state.workout_plans.get(day, {}).get('success'):
-                        st.warning(f"⚠️ **API Error:** Showing fallback plan. Error: {st.session_state.workout_plans.get(day, {}).get('error', 'Unknown error')}.")
+                    with st.expander(f"📋 {day_title} Workout Log", expanded=True if idx == 0 else False):
+                        
+                        st.markdown(f"### **{day_title}**") # Display the dynamic day title
+                        
+                        # NEW INTERACTIVE DISPLAY
+                        display_interactive_workout_day(day, plan_json, profile, advisor) 
+                        
+                        # If it was a fallback plan, show the error message
+                        if not st.session_state.workout_plans.get(day, {}).get('success'):
+                            st.warning(f"⚠️ **API Error:** Showing fallback plan. Error: {st.session_state.workout_plans.get(day, {}).get('error', 'Unknown error')}.")
 
                 elif day in st.session_state.workout_plans:
                     # Fallback to display the static markdown if JSON failed, but markdown was generated
@@ -2014,115 +2133,52 @@ def main():
                     st.markdown(plan_data['plan_md'])
                 else:
                     st.warning("Plan not available")
-        
-        # Display consolidated Progression Tip
-        st.markdown("---")
-        st.markdown("## 📈 Weekly Progression Tip (CRITICAL FOR PROGRESS)")
-        
-        best_tip = next(
-            (tip for day, tip in st.session_state.all_progression_tips.items() 
-             if st.session_state.workout_plans.get(day, {}).get('success', False)),
-            st.session_state.all_progression_tips.get(profile.get('days_per_week', [''])[0], "Maintain current routine and focus on perfect form.")
-        )
-        st.success(f"**Your Focus for Next Week:** {best_tip}")
-        st.markdown("---")
-        
-        # Action buttons
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("🔄 Generate New Plan", use_container_width=True):
-                st.session_state.fitness_plan_generated = False
-                st.session_state.workout_plans = {}
-                st.session_state.user_profile = {}
-                st.session_state.all_prompts = {}
-                st.session_state.all_json_plans = {}
-                st.session_state.all_progression_tips = {}
-                st.session_state.logged_performance = {}
-                st.rerun()
-        
-        with col2:
-            markdown_content = generate_markdown_export(
-                profile, 
-                st.session_state.workout_plans,
-                best_tip
-            )
-            st.download_button(
-                label="📥 Download Plan (MD)",
-                data=markdown_content,
-                file_name=f"FriskaAI_Plan_{profile.get('name', 'User')}_{datetime.now().strftime('%Y%m%d')}.md",
-                mime="text/markdown",
-                use_container_width=True
-            )
             
-        with col3:
-             # Download JSON format
-            json_export_data = {
-                "profile": profile,
-                "plans_json": st.session_state.all_json_plans,
-                "logged_performance": st.session_state.logged_performance # Include logged data for completeness
-            }
-            json_content = json.dumps(json_export_data, indent=4)
-            st.download_button(
-                label="⬇️ Download Plan (JSON)",
-                data=json_content,
-                file_name=f"FriskaAI_Plan_{profile.get('name', 'User')}_{datetime.now().strftime('%Y%m%d')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-
-        
-        # Additional Resources
-        st.markdown("---")
-        st.markdown("## 📚 Additional Resources")
-        
-        with st.expander("💡 Training Tips"):
-            st.markdown("""
-            **Maximizing Your Workout:**
-            - **Warm-up is mandatory** - Never skip the warm-up to prevent injuries
-            - **RPE Guide**: 
-              - 3-4: Very light, can talk easily
-              - 5-6: Moderate, breathing harder but can hold conversation
-              - 7-8: Hard, difficult to talk
-              - 9-10: Maximum effort
-            - **Progressive Overload**: Gradually increase difficulty week by week
-            - **Recovery**: Rest days are when muscles grow stronger
-            - **Hydration**: Drink water before, during, and after workouts
-            - **Form > Weight**: Perfect technique prevents injuries
-            """)
-        
-        with st.expander("🍎 Nutrition Guidelines"):
-            st.markdown(f"""
-            **Based on your goal: {profile.get('primary_goal', 'N/A')}**
             
-            {get_nutrition_guidelines(profile.get('primary_goal', 'General Fitness'))}
             
-            **General Tips:**
-            - Stay hydrated (8-10 glasses of water daily)
-            - Eat protein within 2 hours post-workout
-            - Balance macros: Protein, Carbs, Healthy Fats
-            - Avoid processed foods and excessive sugar
-            """)
-        
-        with st.expander("⚠️ Safety Warnings"):
-            st.markdown("""
-            **STOP EXERCISING if you experience:**
-            - Chest pain or pressure
-            - Severe shortness of breath
-            - Dizziness or lightheadedness
-            - Unusual fatigue
-            - Sharp joint pain
-            - Numbness or tingling
+            # Action buttons
+            col1, col2, col3 = st.columns(3)
             
-            **Important Notes:**
-            - This plan is AI-generated guidance, NOT medical advice
-            - Consult your doctor before starting any exercise program
-            - Listen to your body and modify as needed
-            - Keep emergency contacts readily available
-            """)
-        
-        # FAQ Section
-        display_faq()
+            with col1:
+                if st.button("🔄 Generate New Plan", use_container_width=True):
+                    st.session_state.fitness_plan_generated = False
+                    st.session_state.workout_plans = {}
+                    st.session_state.user_profile = {}
+                    st.session_state.all_prompts = {}
+                    st.session_state.all_json_plans = {}
+                    st.session_state.all_progression_tips = {}
+                    st.session_state.logged_performance = {}
+                    st.rerun()
+            
+            with col2:
+                markdown_content = generate_markdown_export(
+                    profile, 
+                    st.session_state.workout_plans,
+                    best_tip
+                )
+                st.download_button(
+                    label="📥 Download Plan (MD)",
+                    data=markdown_content,
+                    file_name=f"FriskaAI_Plan_{profile.get('name', 'User')}_{datetime.now().strftime('%Y%m%d')}.md",
+                    mime="text/markdown",
+                    use_container_width=True
+                )
+                
+            with col3:
+                 # Download JSON format
+                json_export_data = {
+                    "profile": profile,
+                    "plans_json": st.session_state.all_json_plans,
+                    "logged_performance": st.session_state.logged_performance # Include logged data for completeness
+                }
+                json_content = json.dumps(json_export_data, indent=4)
+                st.download_button(
+                    label="⬇️ Download Plan (JSON)",
+                    data=json_content,
+                    file_name=f"FriskaAI_Plan_{profile.get('name', 'User')}_{datetime.now().strftime('%Y%m%d')}.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
 
 def generate_markdown_export(profile: Dict, workout_plans: Dict, progression_tip: str) -> str:
     """Generate markdown file for download, including the progression tip."""
@@ -2162,7 +2218,7 @@ def generate_markdown_export(profile: Dict, workout_plans: Dict, progression_tip
         if day in workout_plans and workout_plans[day].get('plan_md'):
             status = "✅ SUCCESS" if workout_plans[day]['success'] else "⚠️ FALLBACK PLAN (API Error)"
             
-            # [UPDATE 1] Dynamic Day Title
+            # [UPDATE 1] Dynamic Day Title Fix: Use the day and the category for a descriptive title
             plan_json = st.session_state.all_json_plans.get(day, {})
             main_category = plan_json.get('main_workout_category', 'Workout')
             
@@ -2185,143 +2241,6 @@ def generate_markdown_export(profile: Dict, workout_plans: Dict, progression_tip
     
     return md_content
 
-def get_nutrition_guidelines(goal: str) -> str:
-    """Get nutrition guidelines based on goal"""
-    
-    guidelines = {
-        "Weight Loss": """
-        - **Calorie Deficit**: Consume 300-500 calories below maintenance
-        - **Protein**: 1.6-2.2g per kg bodyweight (preserves muscle)
-        - **Carbs**: Moderate (prioritize around workouts)
-        - **Fats**: 0.8-1g per kg bodyweight
-        - **Meal Timing**: Eat protein with each meal
-        """,
-        "Muscle Gain": """
-        - **Calorie Surplus**: Consume 200-400 calories above maintenance
-        - **Protein**: 1.8-2.4g per kg bodyweight
-        - **Carbs**: High (fuel for training and recovery)
-        - **Fats**: 0.8-1.2g per kg bodyweight
-        - **Post-Workout**: Protein + Carbs within 2 hours
-        """,
-        "Increase Overall Strength": """
-        - **Balanced Calories**: Slight surplus or maintenance
-        - **Protein**: 1.8-2.2g per kg bodyweight
-        - **Carbs**: Moderate to high (power fuel)
-        - **Pre-Workout**: Carbs for energy
-        - **Recovery**: Focus on protein and sleep
-        """,
-        "Improve Cardiovascular Fitness": """
-        - **Balanced Diet**: Maintenance calories
-        - **Carbs**: Moderate to high (endurance fuel)
-        - **Hydration**: Critical for performance
-        - **Electrolytes**: Important for longer sessions
-        - **Timing**: Light meal 2-3 hours before cardio
-        """,
-        "Rehabilitation & Injury Prevention": """
-        - **Anti-Inflammatory Foods**: Omega-3s, berries, leafy greens
-        - **Protein**: 1.6-2.0g per kg (tissue repair)
-        - **Vitamin D & Calcium**: Bone health
-        - **Collagen**: Consider supplementation
-        - **Hydration**: Essential for joint health
-        """,
-        "Improve Flexibility & Mobility": """
-        - **Hydration**: Essential for tissue elasticity and joint lubrication.
-        - **Nutrient Rich**: Focus on vitamins and minerals for joint health.
-        - **Magnesium**: May help with muscle relaxation.
-        """,
-        "Improve Posture and Balance": """
-        - **Protein**: Adequate intake for muscle repair and core strength.
-        - **Magnesium and Calcium**: Important for neuromuscular function.
-        - **Ergonomics**: Pay attention to nutrition at your desk/workstation (e.g., proper seating).
-        """
-    }
-    
-    return guidelines.get(goal, """
-    - **Balanced Approach**: Maintenance calories
-    - **Protein**: 1.6-2.0g per kg bodyweight
-    - **Carbs & Fats**: Balanced based on activity level
-    - **Whole Foods**: Prioritize unprocessed options
-    - **Consistency**: Key to long-term results
-    """)
-
-def display_faq():
-    """Display FAQ section"""
-    st.markdown("---")
-    st.markdown("## ❓ Frequently Asked Questions")
-    
-    faq_items = {
-        "How often should I update my fitness level?": """
-        Reassess every 4-6 weeks. Signs you've progressed:
-        - Exercises feel easier at same intensity
-        - Can complete more reps/longer duration
-        - Recovery time has decreased
-        """,
-        
-        "What if I miss a workout?": """
-        Don't panic! Here's what to do:
-        - **Missed 1 day**: Continue with next scheduled workout
-        - **Missed 2-3 days**: Resume at lower intensity (80%)
-        - **Missed >1 week**: Consider restarting at previous fitness level
-        - Never "double up" to make up for missed sessions
-        """,
-        
-        "Can I do the workouts at home?": """
-        Absolutely! If you selected "Bodyweight Only" equipment, all exercises are home-friendly. 
-        You can also modify equipment-based exercises with household items.
-        """,
-        
-        "How long until I see results?": """
-        Timeline varies by goal:
-        - **Strength**: 2-4 weeks (neural adaptations)
-        - **Muscle Growth**: 6-8 weeks (visible changes)
-        - **Weight Loss**: 4-8 weeks (1-2 lbs/week is healthy)
-        
-        Consistency is key!
-        """,
-        
-        "What if an exercise hurts?": """
-        **STOP IMMEDIATELY.** Pain is your body's warning signal.
-        
-        Then:
-        1. Assess: Sharp pain vs. muscle fatigue?
-        2. Modify: Use easier variation or skip exercise
-        3. Rest: Allow 24-48 hours recovery
-        """,
-        
-        "Do I need supplements?": """
-        Not required, but can help. **⚠️ ALWAYS consult doctor before starting supplements, especially with medical conditions.**
-        """
-    }
-    
-    for question, answer in faq_items.items():
-        with st.expander(f"❔ {question}"):
-            st.markdown(answer)
-
-# ============ FOOTER ============
-def display_footer():
-    """Display footer with disclaimers"""
-    st.markdown("---")
-    st.markdown("""
-    <div style='text-align: center; color: #666; padding: 2rem;'>
-        <h3>⚠️ Medical Disclaimer</h3>
-        <p>
-        <strong>This fitness plan is AI-generated guidance and NOT medical advice.</strong><br>
-        Always consult with a qualified healthcare provider before starting any exercise program,<br>
-        especially if you have pre-existing medical conditions or physical limitations.
-        </p>
-        <p>
-        <strong>FriskaAI and its creators are not liable for any injuries or health complications<br>
-        arising from the use of these workout plans.</strong>
-        </p>
-        <hr style='margin: 2rem 0;'>
-        <p style='font-size: 0.9em;'>
-        💪 <strong>FriskaAI Fitness Coach</strong> | Powered by AI<br>
-        © 2025 | For educational and informational purposes only
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
 # ============ RUN APPLICATION ============
 if __name__ == "__main__": 
     main()
-    display_footer()
