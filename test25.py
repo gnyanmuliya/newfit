@@ -8,10 +8,10 @@ import json
 import numpy as np
 import time
 import os # Import os for path handling
-from dotenv import load_dotenv # New import
+ # New import
 import difflib # Import for fuzzy matching
 
-load_dotenv() # Load environment variables immediately
+
 
 # ============ CONFIGURATION ============
 # NOTE: The API key and Endpoint URL are set for an Azure Mistral deployment.
