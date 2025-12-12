@@ -143,7 +143,7 @@ TRAINING_LEVELS = {
     "Beginner (0–6 months)": {
         "description": "New or detrained users with low motor control. Focus on strictly low-impact movements.",
         "rpe_range": "3-5",
-        "rules": "Low-impact only. Prioritize mobility, stability, and support-based balance drills.avoid normal push ups and squats,plank initially.",
+        "rules": "Low-impact only. Prioritize mobility, stability, and support-based balance drills.",
         "met_key": "met_low",
         "allowed_examples": [
             "Chair squat", "Box squat", "Glute bridge", "Hip hinge drills",
