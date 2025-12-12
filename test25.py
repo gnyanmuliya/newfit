@@ -10,8 +10,7 @@ import time
 import os # Import os for path handling
  # New import
 import difflib # Import for fuzzy matching
-
-
+ # Load environment variables immediately
 
 # ============ CONFIGURATION ============
 # NOTE: The API key and Endpoint URL are set for an Azure Mistral deployment.
@@ -896,11 +895,12 @@ class FitnessAdvisor:
                  target_reps = f"10-{target_reps}"
         
         # Gender Adjustment
-        if gender.lower() == "female" and fitness_level not in ["Beginner (0–6 months)", "Advanced (2+ years)"]:
-            if '-' in target_rpe:
-                 rpe_low = int(target_rpe.split('-')[0])
-                 rpe_high = int(target_rpe.split('-')[-1])
-                 target_rpe = f"{rpe_low}-{max(rpe_high - 1, rpe_low)}"
+        if gender.lower() == "female":
+            if fitness_level == "Beginner (0–6 months)":
+                special_population_rules.append("FEMALE BEGINNER: Avoid overly advanced upper-body progressions (e.g., standard push-ups from toes) immediately; start with incline or knee variations.")
+            special_population_rules.append("Slightly reduce upper-body volume relative to lower body unless goal is specifically 'Muscle Gain'.")
+
+        population_constraints_str = " | ".join(special_population_rules) if special_population_rules else "Standard population rules apply."
 
         # --- REPETITION AVOIDANCE ---
         exercises_to_avoid = set()
@@ -951,19 +951,22 @@ class FitnessAdvisor:
         # Advanced Safety Avoidance (BMI/Age/Level Override)
         advanced_avoid_exercises = []
         safety_priority_note = ""
-        
+        special_population_rules = []
+
         if age >= 60:
-            advanced_avoid_exercises.extend([
-                "Heavy Compound Lifts", "High Impact Plyometrics", "Ballistic Movements"
-            ])
-            safety_priority_note = "AGE PRIORITY (≥ 60): Prioritize balance, mobility, and joint-friendly movements. Reduce overall volume and intensity."
-        
+            special_population_rules.append("AGE ≥ 60 DETECTED: Reduce impact and volume. Prioritize balance, stability, and joint-friendly movements.")
+            special_population_rules.append("Select 'Beginner' or 'Intermediate' variations regardless of history unless explicitly requested.")
+            special_population_rules.append("STRICTLY FORBIDDEN: Explosive movements (box jumps), high-risk spinal loading.")
+            # Adjust RPE down slightly for safety
+            if '-' in target_rpe:
+                rpe_high = int(target_rpe.split('-')[-1])
+                target_rpe = f"{target_rpe.split('-')[0]}-{max(rpe_high - 1, int(target_rpe.split('-')[0]) + 1)}"
         if bmi > 30:
-            advanced_avoid_exercises.extend([
-                "High Impact Jumps", "Fast Tempo/Ballistic Movements", "Deep Spinal Flexion/Extension"
-            ])
-            safety_priority_note += (" " if safety_priority_note else "") + "BMI PRIORITY (≥ 30): Emphasize low-impact exercises and gradual progression."
-            
+            special_population_rules.append("BMI ≥ 30 DETECTED: Emphasize low-impact exercises to protect joints.")
+            special_population_rules.append("Avoid frequent floor-to-standing transitions (keep exercises standing or seated/bench if possible).")
+            special_population_rules.append("STRICTLY FORBIDDEN: Plyometrics, Jumps, Burpees.")
+            special_population_rules.append("Focus on stability and step-wise progression.")
+
         # Combine medical restrictions and advanced safety notes
         medical_restrictions_list = []
         if medical_conditions and medical_conditions != ["None"]:
@@ -1073,6 +1076,7 @@ class FitnessAdvisor:
             f"- Targeted Body Parts: **{target_body_parts_str}**", # NEW: Target body part instruction
             "",
             "# 3. RESTRICTION RULES (DYNAMICALLY INJECTED)",
+            f"- **{population_constraints_str}**",
             f"- Current Day: **{day_name}** | Fitness Level/Experience: **{fitness_level}**", # Updated level reference
             f"- Fitness Level Constraints: **{level_rules}**",
             f"- **FORBIDDEN MOVES (Level-Specific):** You MUST NOT use these exercises: **{', '.join(level_rules)}**.",
@@ -1084,7 +1088,7 @@ class FitnessAdvisor:
             f"- Medical and Safety Restrictions: **{final_medical_restrictions}**", 
             f"- Physical limitations: **{user_profile.get('physical_limitation', 'None')}**",
             "",
-            "# 4. REQUIRED EXERCISE STRUCTURE",
+            "# 4.0 REQUIRED EXERCISE STRUCTURE",
             f"- Session Duration Breakdown: **{duration_breakdown}** (For pacing guidance)", 
             f"- Warmup: exactly 3 exercises. MUST use the **'reps'** field for dynamic movements, not 'duration'.",
             f"- **Warmup Structure Mandate (CRITICAL VARIATION):** The 3 exercises MUST follow this order and focus.If any exercises are performed in both side (left/right) then it should show either sec/side or rep/side in reps. Exercise names MUST be varied across different training days (e.g., use Cat-Cow Stretch, Seated Glute Stretch, or Wall Chest Stretch instead of generic 'Stretch'). **AVOID repeating:** Arm Circles, Standing Hip Swings, Low-Impact High Knees, Scapular Push-Ups, Thoracic Rotations.",
@@ -1094,6 +1098,11 @@ class FitnessAdvisor:
             f"- Cooldown: exactly 3 static stretches/exercises.Exercises/Static Stretches MUST related to the main workout.The duration for this should be treated as **15-30 sec**.If any exercises are performed in both side (left/right) then it should show either sec/side or rep/side in reps. Exercise names MUST be varied across different training days. **AVOID repeating:** (same exercises) (eg.Seated Glute Stretch, Wall Chest Stretch, Deep Diaphragmatic Breathing, Standing Quad Stretch, Hamstring Floor Stretch, shoulder static stretch)",
             f"- Main workout: exactly {max_main_exercises} exercises. **All main exercises must be unique from each other and the warm-up/cool-down.All exercises are standerd not modified.**",
             f"- **Movement Focus Mandate:** {required_structure}", # UPDATED: Use dynamic structure based on body parts
+            "",
+            "# 4.1 SUBSTITUTION & SAFETY PROTOCOL (MANDATORY)",
+            "- **SUBSTITUTION RULE:** If an exercise is contraindicated by a medical condition, too advanced (e.g., jumps for BMI>30/Age>60), or requires unavailable equipment, you MUST downgrade it.",
+            "- **FORMAT:** If you substitute an exercise, you MUST fill the `substitution_note` field in JSON with: 'Replaced [Original Exercise] with [New Exercise] because [Reason (e.g., too advanced / unsafe / equipment unavailable)].'",
+            "- **SAFETY CUES:** Every exercise MUST have a `safety_cue` specific to the user's constraints (e.g., 'Perform slowly to protect knees').",
             "",
             "# 5. SAFETY & GOAL MANDATES (CRITICAL CALORIE GUIDANCE)",
             f"- Intensity: Main workout RPE must be **{target_rpe}** | Warmup/Cooldown RPE must be **RPE 1-3**.",
