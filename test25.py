@@ -8,10 +8,8 @@ import json
 import numpy as np
 import time
 import os # Import os for path handling
- # New import
-import difflib # Import for fuzzy matching
-
- # Load environment variables immediately
+# New import
+import difflib # Import for fuzzy matching # Load environment variables immediately
 
 # ============ CONFIGURATION ============
 # NOTE: The API key and Endpoint URL are set for an Azure Mistral deployment.
@@ -960,7 +958,7 @@ class FitnessAdvisor:
         if age >= 60:
             special_population_rules.append("AGE ≥ 60 DETECTED: Reduce impact and volume. Prioritize balance, stability, and joint-friendly movements.")
             special_population_rules.append("Select 'Beginner' or 'Intermediate' variations regardless of history unless explicitly requested.")
-            special_population_rules.append("STRICTLY FORBIDDEN: Explosive movements (box jumps), high-risk spinal loading.")
+            special_population_rules.append("STRICTLY FORBIDDEN: Explosive movements (box jumps), high-risk spinal loading,Push-ups (regular, decline),Planks and side planks,Lunges & Bulgarian split squats,Squat jumps,Mountain climbers,Burpees,RDL, deadlift, barbell work,Resistance band rows,Any weighted variation,Any floor up-down transitions that may cause dizziness or BP spikes.")
             # Adjust RPE down slightly for safety
             if '-' in target_rpe:
                 rpe_high = int(target_rpe.split('-')[-1])
@@ -970,7 +968,9 @@ class FitnessAdvisor:
             special_population_rules.append("Avoid frequent floor-to-standing transitions (keep exercises standing or seated/bench if possible).")
             special_population_rules.append("STRICTLY FORBIDDEN: Plyometrics, Jumps, Burpees.")
             special_population_rules.append("Focus on stability and step-wise progression.")
-
+            special_population_rules.append("STRICTLY FORBIDDEN: Explosive movements (box jumps), high-risk spinal loading,Push-ups (regular, decline),Planks and side planks,Lunges & Bulgarian split squats,Squat jumps,Mountain climbers,Burpees,RDL, deadlift, barbell work,Resistance band rows,Any weighted variation,Any floor up-down transitions that may cause dizziness or BP spikes.")
+            # Adjust RPE down slightly for safety
+ 
         # Combine medical restrictions and advanced safety notes
         medical_restrictions_list = []
         if medical_conditions and medical_conditions != ["None"]:
@@ -1081,6 +1081,7 @@ class FitnessAdvisor:
             "",
             "# 3. RESTRICTION RULES (DYNAMICALLY INJECTED)",
             f"- **{population_constraints_str}**",
+            f"- If Age>=60 or BMI>30, PRIORITIZE low-impact, joint-friendly exercises and AVOID high-risk movements, Give easier version of push-ups/planks/lunges/squats/deadlifts.(eg.knee push-ups,incline push-ups,wall push-ups,glute bridges instead of deadlifts)",
             f"- Current Day: **{day_name}** | Fitness Level/Experience: **{fitness_level}**", # Updated level reference
             f"- Fitness Level Constraints: **{level_rules}**",
             f"- **FORBIDDEN MOVES (Level-Specific):** You MUST NOT use these exercises: **{', '.join(level_rules)}**.",
