@@ -893,7 +893,7 @@ class FitnessAdvisor:
                  target_reps = f"{max(low_rep, 8)}-{target_reps.split('-')[-1]}"
              elif int(target_reps.split('-')[-1]) > 12:
                  target_reps = f"10-{target_reps}"
-        
+        special_population_rules = []
         # Gender Adjustment
         if gender.lower() == "female":
             if fitness_level == "Beginner (0–6 months)":
