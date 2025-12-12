@@ -10,6 +10,7 @@ import time
 import os # Import os for path handling
  # New import
 import difflib # Import for fuzzy matching
+
  # Load environment variables immediately
 
 # ============ CONFIGURATION ============
@@ -144,7 +145,7 @@ TRAINING_LEVELS = {
     "Beginner (0–6 months)": {
         "description": "New or detrained users with low motor control. Focus on strictly low-impact movements.",
         "rpe_range": "3-5",
-        "rules": "Low-impact only. Prioritize mobility, stability, and support-based balance drills.",
+        "rules": "Low-impact only. Prioritize mobility, stability, and support-based balance drills.avoid normal push ups and squats,plank initially.",
         "met_key": "met_low",
         "allowed_examples": [
             "Chair squat", "Box squat", "Glute bridge", "Hip hinge drills",
@@ -365,7 +366,7 @@ class FitnessAdvisor:
             
         # 3. Fallback based on activity type if no specific or fuzzy match is found
         if 'walk' in clean_name_base or 'march' in clean_name_base or 'stretch' in clean_name_base or 'mobility' in clean_name_base:
-            return 3.0 # Low intensity fallback
+            return 2.0 # Low intensity fallback
         if 'squat' in clean_name_base or 'lunge' in clean_name_base or 'press' in clean_name_base or 'row' in clean_name_base:
             return 5.0 # Moderate intensity fallback
         if 'jump' in clean_name_base or 'run' in clean_name_base or 'burpee' in clean_name_base:
@@ -893,7 +894,9 @@ class FitnessAdvisor:
                  target_reps = f"{max(low_rep, 8)}-{target_reps.split('-')[-1]}"
              elif int(target_reps.split('-')[-1]) > 12:
                  target_reps = f"10-{target_reps}"
+        
         special_population_rules = []
+
         # Gender Adjustment
         if gender.lower() == "female":
             if fitness_level == "Beginner (0–6 months)":
@@ -951,6 +954,7 @@ class FitnessAdvisor:
         # Advanced Safety Avoidance (BMI/Age/Level Override)
         advanced_avoid_exercises = []
         safety_priority_note = ""
+
         special_population_rules = []
 
         if age >= 60:
@@ -1082,7 +1086,7 @@ class FitnessAdvisor:
             f"- **FORBIDDEN MOVES (Level-Specific):** You MUST NOT use these exercises: **{', '.join(level_rules)}**.",
             f"- **RECOMMENDED MOVES:** Prioritize these exercises: **{', '.join(level_rules)}**.",
             f"- Training Consistency Rule: **{repetition_rule}**", 
-            f"- Equipment & Location Rule: **{equipment_rule}**. Strictly use only these equipment options: **{allowed_equipment}**", 
+            f"- Equipment & Location Rule: **{equipment_rule}**. Strictly use only these equipment options: **{allowed_equipment}**, Not available equipment MUST NOT be included.(eg. resistance bands if not listed,no exercise using bands)", 
             f"- **STRICT EXERCISE NAME AVOIDANCE (All Previous Days):** DO NOT use these specific exercise names in ANY section: **{', '.join(exercises_to_avoid_list) if exercises_to_avoid_list else 'None'}**", 
             f"- **STRICT PATTERN AVOIDANCE (Recovery Constraint from last 3 days):** To ensure muscle group recovery and maximize variety, prioritize movements NOT listed here: **{', '.join(patterns_to_avoid_list) if patterns_to_avoid_list else 'None/Minor Muscle Groups Only'}**",
             f"- Medical and Safety Restrictions: **{final_medical_restrictions}**", 
