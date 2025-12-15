@@ -10,6 +10,7 @@ import time
 import os # Import os for path handling
  # New import
 import difflib # Import for fuzzy matching
+
  # Load environment variables immediately
 
 # ============ CONFIGURATION ============
@@ -38,7 +39,7 @@ FALLBACK_MEDICAL_CONDITIONS_DATA = {
         "medications": "ACE inhibitors, Beta-blockers, Diuretics",
         "direct_impact": "May reduce exercise capacity, affect heart rate response",
         "indirect_impact": "Dizziness, fatigue",
-        "contraindicated": "Valsalva maneuvers, heavy isometric holds, overhead pressing without control, High-Intensity Interval Training (HIIT) without medical clearance.",
+        "contraindicated": "Valsalva maneuvers, heavy isometric holds, overhead pressing without control, High-Intensity Interval Training (HIIT) without medical clearance.Planks, Static Wall Sits, Isometric Holds > 5 sec, Valsalva maneuvers, Overhead lifting, Feet-elevated exercises.",
         "modified_safer": "Controlled breathing, moderate resistance, continuous breathing pattern, steady-state cardio."
     },
     "Type 2 Diabetes": {
@@ -1114,7 +1115,25 @@ class FitnessAdvisor:
             f"- **STRICT PATTERN AVOIDANCE (Recovery Constraint from last 3 days):** To ensure muscle group recovery and maximize variety, prioritize movements NOT listed here: **{', '.join(patterns_to_avoid_list) if patterns_to_avoid_list else 'None/Minor Muscle Groups Only'}**",
             f"- Medical and Safety Restrictions: **{final_medical_restrictions}**", 
             f"- Physical limitations: **{user_profile.get('physical_limitation', 'None')}**",
+            # ... existing lines ...
+            f"- **{population_constraints_str}**",
+            
+            # --- START STRICTER MEDICAL SECTION ---
+            "### CRITICAL SAFETY OVERRIDES (HIGHEST PRIORITY)",
+            f"- **PRIMARY MEDICAL MANDATE:** The restrictions below OVERRIDE all other instructions. If an exercise contradicts these, you must NOT use it.",
+            f"- **Active Medical Conditions:** {final_medical_restrictions}",
+            f"- **User-Defined Physical Limitations:** {user_profile.get('physical_limitation', 'None')}",
+            
+            # Explicit logic for the AI to process the limitation text
+            f"- **CONSTRAINT ENFORCEMENT:**",
+            f"  1. If limitation mentions **'knee'**: STRIKE OUT all Lunges, Deep Squats, Jump Squats, Kneeling exercises.",
+            f"  2. If limitation mentions **'back'**: STRIKE OUT Sit-ups, Crunches, Superman, Heavy Overhead Press.",
+            f"  3. If limitation mentions **'shoulder'**: STRIKE OUT Overhead Press, Dips, Upright Rows.",
+            f"  4. If limitation mentions **'hypertension'** or **'BP'**: STRIKE OUT Planks, Isometric Holds, Feet-Elevated moves.",
+            # --- END STRICTER MEDICAL SECTION ---
 
+            f"- Current Day: **{day_name}** | Fitness Level/Experience: **{fitness_level}**", 
+        
             "# 4.0 REQUIRED EXERCISE STRUCTURE",
             f"- Session Duration Breakdown: **{duration_breakdown}** (For pacing guidance)", 
             f"- Warmup: exactly 3 exercises. MUST use the **'reps'** field for dynamic movements, not 'duration'.",
@@ -1123,7 +1142,8 @@ class FitnessAdvisor:
             "   2. Upper Body Dynamic Stretch/Mobility. The duration for this should be treated as **10-15 reps** for calculation.",
             "   3. Lower Body Dynamic Stretch/Mobility. The duration for this should be treated as **10-15 reps** for calculation.",
             f"- Cooldown: exactly 3 static stretches/exercises.Exercises/Static Stretches MUST related to the main workout.The duration for this should be treated as **15-30 sec**.If any exercises are performed in both side (left/right) then it should show either sec/side or rep/side in reps. Exercise names MUST be varied across different training days. **AVOID repeating:** (same exercises) (eg.Seated Glute Stretch, Wall Chest Stretch, Deep Diaphragmatic Breathing, Standing Quad Stretch, Hamstring Floor Stretch, shoulder static stretch)",
-            f"- Main workout: exactly {max_main_exercises} exercises. **All main exercises must be unique from each other and the warm-up/cool-down.All exercises are standerd not modified.**",
+            f"- Main workout: exactly {max_main_exercises} exercises. **All main exercises must be unique from each other and the warm-up/cool-down.**",
+            "- **STRICT EXERCISE NAMING:** Use ONLY standard, recognized kinesiology terms. **DO NOT INVENT** exercises (e.g., 'Seated Hip Circles' is invalid -> use 'Seated Hip Internal/External Rotation' or 'Seated March').",
             f"- **Movement Focus Mandate:** {required_structure}", # UPDATED: Use dynamic structure based on body parts
             "",
             "# 4.1 SUBSTITUTION & SAFETY PROTOCOL (MANDATORY)",
