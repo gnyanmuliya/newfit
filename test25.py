@@ -8,14 +8,15 @@ import json
 import numpy as np
 import time
 import os # Import os for path handling
-# New import
-import difflib # Import for fuzzy matching # Load environment variables immediately
+ # New import
+import difflib # Import for fuzzy matching
+ # Load environment variables immediately
 
 # ============ CONFIGURATION ============
 # NOTE: The API key and Endpoint URL are set for an Azure Mistral deployment.
 # API_KEY and ENDPOINT_URL are kept as provided.
-API_KEY = "08Z5HKTA9TshVWbKb68vsef3oG7Xx0Hd"
-ENDPOINT_URL = "https://mistral-small-2503-Gnyan-Test.swedencentral.models.ai.azure.com/chat/completions"
+API_KEY = "uYlty4uFyTmjrb1TwAIS8a1Yxj39OB2R"
+ENDPOINT_URL = "https://mistral-small-2503-Gnyan-Test01.westus.models.ai.azure.com/chat/completions"
 
 if API_KEY == "ERROR_KEY_MISSING" or ENDPOINT_URL == "ERROR_URL_MISSING":
     st.error("Configuration Error: API Key or Endpoint URL not found. Please ensure your .env file is set up correctly.")
@@ -364,11 +365,11 @@ class FitnessAdvisor:
             
         # 3. Fallback based on activity type if no specific or fuzzy match is found
         if 'walk' in clean_name_base or 'march' in clean_name_base or 'stretch' in clean_name_base or 'mobility' in clean_name_base:
-            return 2.0 # Low intensity fallback
+            return 1.5 # Low intensity fallback
         if 'squat' in clean_name_base or 'lunge' in clean_name_base or 'press' in clean_name_base or 'row' in clean_name_base:
-            return 5.0 # Moderate intensity fallback
+            return 3.0 # Moderate intensity fallback
         if 'jump' in clean_name_base or 'run' in clean_name_base or 'burpee' in clean_name_base:
-            return 8.0 # High intensity fallback
+            return 6.0 # High intensity fallback
         
         return 3.0 # General safe fallback MET value
 
@@ -901,6 +902,26 @@ class FitnessAdvisor:
                 special_population_rules.append("FEMALE BEGINNER: Avoid overly advanced upper-body progressions (e.g., standard push-ups from toes) immediately; start with incline or knee variations.")
             special_population_rules.append("Slightly reduce upper-body volume relative to lower body unless goal is specifically 'Muscle Gain'.")
 
+        
+
+        # ============ NEW STRICT LIMITATION LOGIC ============
+        # Combine physical limitation text and medical conditions for keyword scanning
+        limitation_text = user_profile.get('physical_limitation', '').lower()
+        conditions_text = " ".join(medical_conditions).lower()
+        combined_health_text = f"{limitation_text} {conditions_text}"
+
+        # STRICT KNEE PAIN / INJURY / OSTEOARTHRITIS RULE
+        if any(x in combined_health_text for x in ['knee', 'meniscus', 'acl', 'osteoarthritis', 'joint pain']):
+            special_population_rules.append("🚨 **CRITICAL KNEE LIMITATION DETECTED** 🚨")
+            special_population_rules.append("❌ **STRICTLY AVOID:** Lunges (forward/reverse/walking), Split Squats, Bulgarian Split Squats, Deep Squats, Pistol Squats, Jump Squats, Burpees, Running, Stair Intervals, High Impact movements.")
+            special_population_rules.append("✅ **USE SAFE ALTERNATIVES:** Chair Squat or Partial Squat, Wall Squat (short range), Seated Leg Extension (unloaded), Standing Hip Abduction, Glute Bridge, Hip Hinge Drills, Seated March, Side Stepping.")
+        
+        # You can add similar blocks for Back Pain or Shoulder Pain here in the future
+        if any(x in combined_health_text for x in ['back', 'spine', 'disc', 'lumbar']):
+            special_population_rules.append("🚨 **BACK PAIN DETECTED** 🚨")
+            special_population_rules.append("❌ **STRICTLY AVOID:** Sit-ups, Crunches, Superman (hyperextension), Heavy Overhead Press, Bent Over Rows (unsupported), High Impact.")
+            special_population_rules.append("✅ **USE SAFE ALTERNATIVES:** Bird-Dog, Dead Bug, Plank (if tolerated), Glute Bridge, Chest Supported Row.")
+
         population_constraints_str = " | ".join(special_population_rules) if special_population_rules else "Standard population rules apply."
 
         # --- REPETITION AVOIDANCE ---
@@ -1081,6 +1102,7 @@ class FitnessAdvisor:
             "",
             "# 3. RESTRICTION RULES (DYNAMICALLY INJECTED)",
             f"- **{population_constraints_str}**",
+            f"- If there is any  kind for physical limitation/medical condition, PRIORITIZE safety and AVOID aggravating movements.(eg. for knee pain, avoid lunges/split squats/deep squats/jumps/running)",
             f"- If Age>=60 or BMI>30, PRIORITIZE low-impact, joint-friendly exercises and AVOID high-risk movements, Give easier version of push-ups/planks/lunges/squats/deadlifts.(eg.knee push-ups,incline push-ups,wall push-ups,glute bridges instead of deadlifts)",
             f"- Current Day: **{day_name}** | Fitness Level/Experience: **{fitness_level}**", # Updated level reference
             f"- Fitness Level Constraints: **{level_rules}**",
@@ -1092,7 +1114,7 @@ class FitnessAdvisor:
             f"- **STRICT PATTERN AVOIDANCE (Recovery Constraint from last 3 days):** To ensure muscle group recovery and maximize variety, prioritize movements NOT listed here: **{', '.join(patterns_to_avoid_list) if patterns_to_avoid_list else 'None/Minor Muscle Groups Only'}**",
             f"- Medical and Safety Restrictions: **{final_medical_restrictions}**", 
             f"- Physical limitations: **{user_profile.get('physical_limitation', 'None')}**",
-            "",
+
             "# 4.0 REQUIRED EXERCISE STRUCTURE",
             f"- Session Duration Breakdown: **{duration_breakdown}** (For pacing guidance)", 
             f"- Warmup: exactly 3 exercises. MUST use the **'reps'** field for dynamic movements, not 'duration'.",
