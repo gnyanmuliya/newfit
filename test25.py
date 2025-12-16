@@ -8,7 +8,7 @@ import json
 import numpy as np
 import time
 import os # Import os for path handling
- # New import
+# New import
 import difflib # Import for fuzzy matching
 
  # Load environment variables immediately
@@ -730,7 +730,7 @@ class FitnessAdvisor:
             
             # --- CRITICAL FIX: Overwrite LLM's dummy value with Python's calculated value ---
             # This ensures the JSON export and the static MD reflect the accurate calorie calculation.
-            exercise_data['est_calories'] = calorie_calc_str 
+            exercise_data['est_calories'] = f"Est: {estimated_calories_per_exercise} Cal" 
             # ---------------------------------------------------------------------------------
             
             # Start of the strictly formatted output
@@ -999,9 +999,8 @@ class FitnessAdvisor:
             for condition in medical_conditions:
                 if condition != "None":
                     cond_data = self._get_condition_details_from_db(condition)
-                    # Use cond_data.get('contraindicated', 'High-risk movements') which comes from Excel or fallback
-                    medical_restrictions_list.append(f"CONDITION: {condition}. MUST AVOID: {cond_data.get('contraindicated', 'High-risk movements')}. PRIORITIZE: {cond_data.get('modified_safer', 'Low-impact alternatives')}.")
-        
+                    # STRONG LANGUAGE: "FORBIDDEN"
+                    medical_restrictions_list.append(f"CONDITION: {condition} -> FORBIDDEN: {cond_data.get('contraindicated', 'High-risk moves')}. USE: {cond_data.get('modified_safer', 'Safe alternatives')}.")
         # New specific avoidance rule
         if specific_avoidance.lower() != "none" and specific_avoidance.strip():
              medical_restrictions_list.append(f"USER AVOIDANCE: Must avoid exercises involving or impacting: {specific_avoidance.strip()}.")
@@ -1085,7 +1084,7 @@ class FitnessAdvisor:
                         "benefit": "string",
                         "steps": ["3-5 sequential, descriptive step strings"],
                         "sets": "1",
-                        "hold": "string (e.g., 30-60 seconds / side)",
+                        "reps": "string (e.g., 30-60 seconds / side)",
                         "intensity_rpe": "RPE 1-3",
                         "rest": "15 seconds",
                         # LLM MUST ONLY PROVIDE A DUMMY VALUE/FORMAT. PYTHON WILL REPLACE THIS WITH ACCURATE CALCULATION.
