@@ -1351,21 +1351,21 @@
   },
   "stationary_bike_easy": {
     "name": "Stationary Bike (Easy)",
-    "met_low": 3.5,
-    "met_mod": 5.0,
-    "met_high": 7.0
+    "met_low": 2.5,
+    "met_mod": 4.0,
+    "met_high": 6.0
   },
   "stationary_bike_moderate": {
     "name": "Stationary Bike (Moderate)",
-    "met_low": 5.0,
-    "met_mod": 7.0,
-    "met_high": 9.0
+    "met_low": 4.0,
+    "met_mod": 6.0,
+    "met_high": 8.0
   },
   "stationary_bike_hard": {
     "name": "Stationary Bike (Hard)",
-    "met_low": 7.0,
-    "met_mod": 9.0,
-    "met_high": 12.0
+    "met_low": 6.0,
+    "met_mod": 8.0,
+    "met_high": 11.0
   },
   "recumbent_bike": {
     "name": "Recumbent Bike",
