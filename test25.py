@@ -10,8 +10,7 @@ import time
 import os # Import os for path handling
  # New import
 import difflib # Import for fuzzy matching
-
- # Load environment variables immediately
+# Load environment variables immediately
 
 # ============ CONFIGURATION ============
 # NOTE: The API key and Endpoint URL are set for an Azure Mistral deployment.
@@ -854,6 +853,7 @@ class FitnessAdvisor:
         [FIX 2 Implementation Note] Builds the entire system prompt. The LLM is forced 
         to use the dummy calorie value, which is later corrected by the Python function.
         """
+        print("user_profile:", user_profile)
         
         # --- DYNAMIC VALUE EXTRACTION ---
         name = user_profile.get("name", "User")
@@ -880,6 +880,7 @@ class FitnessAdvisor:
         max_main_exercises = self._determine_exercise_count(user_profile.get("session_duration", "30-45 minutes"), fitness_level)
         total_days = len(user_profile.get("days_per_week", []))
         day_focus, repetition_rule = self._determine_split_focus_and_repetition(total_days, day_index, fitness_level) 
+        
         
         # Level-based static hold duration
         current_level_hold = STATIC_HOLD_SCALING.get(fitness_level, STATIC_HOLD_SCALING["Beginner (0–6 months)"])
@@ -978,7 +979,7 @@ class FitnessAdvisor:
         if location == "Gym" or "Full Gym Access" in equipment_list:
              equipment_rule = "WORKOUT LOCATION IS **GYM**. You MUST prioritize using **GYM SPECIFIC EQUIPMENT** (Machines, Cables, Barbells, Dumbbells) for the Main Workout. DO NOT simply generate a home workout. Use machines (e.g., Leg Press, Lat Pulldown) and cables."
         else:
-             equipment_rule = f"WORKOUT LOCATION is {location}. Exercises MUST align with the environment. If 'Home', limit to bodyweight, dumbbells, bands, or TRX. If 'Outdoor', prioritize walk, jog, step-ups, mobility drills, or bodyweight exercises."
+             equipment_rule = f"WORKOUT LOCATION is {location}. Exercises MUST align with the environment. If 'Home', limit to bodyweight. If 'Outdoor', prioritize walk, jog, step-ups, mobility drills, or bodyweight exercises."
         # Advanced Safety Avoidance (BMI/Age/Level Override)
         advanced_avoid_exercises = []
         safety_priority_note = ""
@@ -1109,59 +1110,57 @@ class FitnessAdvisor:
             f"- Targeted Body Parts: **{target_body_parts_str}**", # NEW: Target body part instruction
             "",
             "# 3. RESTRICTION RULES (DYNAMICALLY INJECTED)",
-            f"- **{population_constraints_str}**",
-            f"- If there is any  kind for physical limitation/medical condition, PRIORITIZE safety and AVOID aggravating movements.(eg. for knee pain, avoid lunges/split squats/deep squats/jumps/running)",
-            f"- If Age>=60 or BMI>30, PRIORITIZE low-impact, joint-friendly exercises and AVOID high-risk movements, Give easier version of push-ups/planks/lunges/squats/deadlifts.(eg.knee push-ups,incline push-ups,wall push-ups,glute bridges instead of deadlifts)",
-            f"- Current Day: **{day_name}** | Fitness Level/Experience: **{fitness_level}**", # Updated level reference
-            f"- Fitness Level Constraints: **{level_rules}**",
-            f"- **FORBIDDEN MOVES (Level-Specific):** You MUST NOT use these exercises: **{', '.join(level_rules)}**.",
-            f"- **RECOMMENDED MOVES:** Prioritize these exercises: **{', '.join(level_rules)}**.",
-            f"- Training Consistency Rule: **{repetition_rule}**", 
-            f"- Equipment & Location Rule: **{equipment_rule}**. Strictly use only these equipment options: **{allowed_equipment}**, Not available equipment MUST NOT be included.(eg. resistance bands if not listed,no exercise using bands)", 
-            f"- **STRICT EXERCISE NAME AVOIDANCE (All Previous Days):** DO NOT use these specific exercise names in ANY section: **{', '.join(exercises_to_avoid_list) if exercises_to_avoid_list else 'None'}**", 
-            f"- **STRICT PATTERN AVOIDANCE (Recovery Constraint from last 3 days):** To ensure muscle group recovery and maximize variety, prioritize movements NOT listed here: **{', '.join(patterns_to_avoid_list) if patterns_to_avoid_list else 'None/Minor Muscle Groups Only'}**",
-            f"- Medical and Safety Restrictions: **{final_medical_restrictions}**", 
-            f"- Physical limitations: **{user_profile.get('physical_limitation', 'None')}**",
-            # ... existing lines ...
-            f"- **{population_constraints_str}**",
-            
-            # --- START STRICTER MEDICAL SECTION ---
-            "### CRITICAL SAFETY OVERRIDES (HIGHEST PRIORITY)",
-            f"- **PRIMARY MEDICAL MANDATE:** The restrictions below OVERRIDE all other instructions. If an exercise contradicts these, you must NOT use it.",
+            # ... [Previous parts of prompt list] ...
+
+            # 3. RULES & CONSTRAINTS (General)
+            f"- **Fitness Level Constraints:** {level_rules}",
+            f"- **FORBIDDEN MOVES (Level-Specific):** You MUST NOT use these exercises: {' '.join(level_rules)}.",
+            f"- **RECOMMENDED MOVES:** Prioritize these exercises: {' '.join(level_rules)}.",
+            f"- **Training Consistency Rule:** {repetition_rule}", 
+            f"- **Equipment & Location Rule:** {equipment_rule}. Strictly use only these equipment options: {allowed_equipment}. Not available equipment MUST NOT be included (e.g., resistance bands if not listed, no exercise using bands).", 
+            f"- **STRICT EXERCISE NAME AVOIDANCE (All Previous Days):** DO NOT use these specific exercise names in ANY section: {', '.join(exercises_to_avoid_list) if exercises_to_avoid_list else 'None'}", 
+            f"- **STRICT PATTERN AVOIDANCE (Recovery Constraint from last 3 days):** To ensure muscle group recovery and maximize variety, prioritize movements NOT listed here: {', '.join(patterns_to_avoid_list) if patterns_to_avoid_list else 'None/Minor Muscle Groups Only'}",
+            "",
+            # 4. CRITICAL SAFETY OVERRIDES (HIGHEST PRIORITY)
+            "### CRITICAL SAFETY OVERRIDES & MEDICAL MANDATES",
+            f"- **PRIMARY MANDATE:** These restrictions OVERRIDE all other instructions. If an exercise contradicts these, you must NOT use it.",
             f"- **Active Medical Conditions:** {final_medical_restrictions}",
             f"- **User-Defined Physical Limitations:** {user_profile.get('physical_limitation', 'None')}",
+            f"- **Population Constraints:** {population_constraints_str}",
+            f"- **General Safety Rule:** If there is any physical limitation/medical condition, PRIORITIZE safety and AVOID aggravating movements (e.g., for knee pain, avoid lunges/split squats/deep squats/jumps/running).",
+            f"- **Age/BMI Rule:** If Age>=60 or BMI>30, PRIORITIZE low-impact, joint-friendly exercises and AVOID high-risk movements. Give easier versions of push-ups/planks/lunges/squats/deadlifts (e.g., incline push-ups, wall push-ups, glute bridges instead of deadlifts).",
             
             # Explicit logic for the AI to process the limitation text
-            f"- **CONSTRAINT ENFORCEMENT:**",
+            f"- **CONSTRAINT ENFORCEMENT LOGIC:**",
             f"  1. If limitation mentions **'knee'**: STRIKE OUT all Lunges, Deep Squats, Jump Squats, Kneeling exercises.",
             f"  2. If limitation mentions **'back'**: STRIKE OUT Sit-ups, Crunches, Superman, Heavy Overhead Press.",
             f"  3. If limitation mentions **'shoulder'**: STRIKE OUT Overhead Press, Dips, Upright Rows.",
             f"  4. If limitation mentions **'hypertension'** or **'BP'**: STRIKE OUT Planks, Isometric Holds, Feet-Elevated moves.",
-            # --- END STRICTER MEDICAL SECTION ---
-
-            f"- Current Day: **{day_name}** | Fitness Level/Experience: **{fitness_level}**", 
-        
-            "# 4.0 REQUIRED EXERCISE STRUCTURE",
+            
+            # Context for the day
+            f"- **Context:** Current Day: **{day_name}** | Fitness Level/Experience: **{fitness_level}**", 
+            "",
+            "# 5.0 REQUIRED EXERCISE STRUCTURE",
             f"- Session Duration Breakdown: **{duration_breakdown}** (For pacing guidance)", 
             f"- Warmup: exactly 3 exercises. MUST use the **'reps'** field for dynamic movements, not 'duration'.",
-            f"- **Warmup Structure Mandate (CRITICAL VARIATION):** The 3 exercises MUST follow this order and focus.If any exercises are performed in both side (left/right) then it should show either sec/side or rep/side in reps. Exercise names MUST be varied across different training days (e.g., use Cat-Cow Stretch, Seated Glute Stretch, or Wall Chest Stretch instead of generic 'Stretch'). **AVOID repeating:** Arm Circles, Standing Hip Swings, Low-Impact High Knees, Scapular Push-Ups, Thoracic Rotations.",
-            "   1. Cardio Type Exercise (e.g., Low-Impact High Knees, Modified Jumping Jacks, Spot Walking/Marching). This exercise MUST account for **90 seconds (1.5 minutes)** of the total duration. The duration MUST be used in the calorie calculation.",
-            "   2. Upper Body Dynamic Stretch/Mobility. The duration for this should be treated as **10-15 reps** for calculation.",
-            "   3. Lower Body Dynamic Stretch/Mobility. The duration for this should be treated as **10-15 reps** for calculation.",
-            f"- Cooldown: exactly 3 static stretches/exercises.Exercises/Static Stretches MUST related to the main workout.The duration for this should be treated as **15-30 sec**.If any exercises are performed in both side (left/right) then it should show either sec/side or rep/side in reps. Exercise names MUST be varied across different training days. **AVOID repeating:** (same exercises) (eg.Seated Glute Stretch, Wall Chest Stretch, Deep Diaphragmatic Breathing, Standing Quad Stretch, Hamstring Floor Stretch, shoulder static stretch)",
+            f"- **Warmup Structure Mandate (CRITICAL VARIATION):** The 3 exercises MUST follow this order and focus. If any exercises are performed in both side (left/right) then it should show either sec/side or rep/side in reps. Exercise names MUST be varied across different training days (e.g., use Cat-Cow Stretch, Seated Glute Stretch, or Wall Chest Stretch instead of generic 'Stretch'). **AVOID repeating:** Arm Circles, Standing Hip Swings, Low-Impact High Knees, Scapular Push-Ups, Thoracic Rotations.",
+            "   1. Cardio Type Exercise (e.g., Low-Impact High Knees, Modified Jumping Jacks, Spot Walking/Marching). This exercise MUST account for **90 seconds (1.5 minutes)** of the total duration. The duration MUST be used in the calorie calculation.",
+            "   2. Upper Body Dynamic Stretch/Mobility. The duration for this should be treated as **10-15 reps** for calculation.",
+            "   3. Lower Body Dynamic Stretch/Mobility. The duration for this should be treated as **10-15 reps** for calculation.",
+            f"- Cooldown: exactly 3 static stretches/exercises. Exercises/Static Stretches MUST relate to the main workout. The duration for this should be treated as **15-30 sec**. If any exercises are performed in both side (left/right) then it should show either sec/side or rep/side in reps. Exercise names MUST be varied across different training days. **AVOID repeating:** (same exercises) (e.g. Seated Glute Stretch, Wall Chest Stretch, Deep Diaphragmatic Breathing, Standing Quad Stretch, Hamstring Floor Stretch, shoulder static stretch)",
             f"- Main workout: exactly {max_main_exercises} exercises. **All main exercises must be unique from each other and the warm-up/cool-down.**",
             "- **STRICT EXERCISE NAMING:** Use ONLY standard, recognized kinesiology terms. **DO NOT INVENT** exercises (e.g., 'Seated Hip Circles' is invalid -> use 'Seated Hip Internal/External Rotation' or 'Seated March').",
-            f"- **Movement Focus Mandate:** {required_structure}", # UPDATED: Use dynamic structure based on body parts
+            f"- **Movement Focus Mandate:** {required_structure}", 
             "",
-            "# 4.1 SUBSTITUTION & SAFETY PROTOCOL (MANDATORY)",
+            "# 5.1 SUBSTITUTION & SAFETY PROTOCOL (MANDATORY)",
             "- **SUBSTITUTION RULE:** If an exercise is contraindicated by a medical condition, too advanced (e.g., jumps for BMI>30/Age>60), or requires unavailable equipment, you MUST downgrade it.",
             "- **FORMAT:** If you substitute an exercise, you MUST fill the `substitution_note` field in JSON with: 'Replaced [Original Exercise] with [New Exercise] because [Reason (e.g., too advanced / unsafe / equipment unavailable)].'",
             "- **SAFETY CUES:** Every exercise MUST have a `safety_cue` specific to the user's constraints (e.g., 'Perform slowly to protect knees').",
             "",
-            "# 5. SAFETY & GOAL MANDATES (CRITICAL CALORIE GUIDANCE)",
+            "# 6. SAFETY & GOAL MANDATES (CRITICAL CALORIE GUIDANCE)",
             f"- Intensity: Main workout RPE must be **{target_rpe}** | Warmup/Cooldown RPE must be **RPE 1-3**.",
             "- **IMPORTANT:** The Calorie (MET) calculation is handled externally by a Python function. Focus solely on generating highly relevant and safe exercise routines according to the rules above. Use a default 'Est: 0 Cal (MET: 0.0)' in your JSON output for the `est_calories` field.",
-            f"- **CRITICAL MANDATE: SAFETY CUE:** Every single exercise object (warmup, main, cooldown) MUST include a specific and concise instruction in the `safety_cue` field related to form, balance, or injury prevention for that particular exercise. DO NOT leave it blank.", # STRONGER MANDATE
+            f"- **CRITICAL MANDATE: SAFETY CUE:** Every single exercise object (warmup, main, cooldown) MUST include a specific and concise instruction in the `safety_cue` field related to form, balance, or injury prevention for that particular exercise. DO NOT leave it blank.", 
             f"- **STRICT MAIN WORKOUT REPS RULE (Standard):** All Main workout exercises MUST be in **Reps: {target_reps}** (e.g., 10-15). **DO NOT** use a 'duration' or 'hold' field in the 'main_workout' section for non-isometric exercises.",
             f"- **SPECIAL ISOMETRIC REPS RULE (Plank/Wall Sit):** For static holds (like Plank, Wall Sit) in the **main_workout** section, the 'reps' field MUST represent the hold time, for example: '**30-45 seconds (or max hold)**'.",
             f"- **BI-LATERAL REPS CLARIFICATION:** For any exercise performed one side at a time (e.g., Lunges, Single-Arm Row, Side Plank), the 'reps' value MUST clearly indicate per side (e.g., '10-12 / side' or '10-12 each leg').",
@@ -1170,9 +1169,9 @@ class FitnessAdvisor:
             "- Never exceed user equipment.",
             "- Prioritize stability for Beginner level users and BMI > 30.",
             "- Safety Notes must include:",
-            "   1. One top-priority safety tip for conditions/limitation.",
-            "   2. One 'Progression Tip: ...' (Mandatory for next week's plan).",
-            "   3. One or two general wellness tips.",
+            "   1. One top-priority safety tip for conditions/limitation.",
+            "   2. One 'Progression Tip: ...' (Mandatory for next week's plan).",
+            "   3. One or two general wellness tips.",
             "",
             "# 6. OUTPUT RULES",
             "- Output **only** valid JSON.",
@@ -1182,6 +1181,8 @@ class FitnessAdvisor:
             "```json"
         ]
         
+        print("prompt_parts","\n".join(prompt_parts))
+
         return "\n".join(prompt_parts)
     
     def _extract_and_move_progression_tip(self, plan_json: Dict) -> str:
