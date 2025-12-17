@@ -8,7 +8,7 @@ import json
 import numpy as np
 import time
 import os # Import os for path handling
-# New import
+ # New import
 import difflib # Import for fuzzy matching
 
  # Load environment variables immediately
@@ -963,14 +963,22 @@ class FitnessAdvisor:
         # --- END REPETITION AVOIDANCE ---
 
         # --- RULE INJECTION - RESTRICTIONS (Section 3) ---
-        allowed_equipment = ', N/A'.join(equipment_list)
+        
+        # FIX: Explicitly add "Seated Hip Circles" to the avoidance list here
+        if 'Seated Hip Circles' not in exercises_to_avoid_list:
+            exercises_to_avoid_list.append("Seated Hip Circles")
+            exercises_to_avoid_list.append("Seated Hip Circle")
+
+        allowed_equipment = ', '.join(equipment_list)
         
         # Fitness Level Constraint Logic (Rule 3.B)
         level_rules = TRAINING_LEVELS[fitness_level]['rules']
         
-        # Location and Equipment Rule 
-        equipment_rule = f"WORKOUT LOCATION is {location}. Exercises MUST align with the environment. If 'Home', limit to bodyweight, dumbbells, bands, or TRX. If 'Gym', include machines, barbells, and cables. If 'Outdoor', prioritize walk, jog, step-ups, mobility drills, or bodyweight exercises."
-        
+        # FIX: Stronger Equipment Rule for Gym
+        if location == "Gym" or "Full Gym Access" in equipment_list:
+             equipment_rule = "WORKOUT LOCATION IS **GYM**. You MUST prioritize using **GYM SPECIFIC EQUIPMENT** (Machines, Cables, Barbells, Dumbbells) for the Main Workout. DO NOT simply generate a home workout. Use machines (e.g., Leg Press, Lat Pulldown) and cables."
+        else:
+             equipment_rule = f"WORKOUT LOCATION is {location}. Exercises MUST align with the environment. If 'Home', limit to bodyweight, dumbbells, bands, or TRX. If 'Outdoor', prioritize walk, jog, step-ups, mobility drills, or bodyweight exercises."
         # Advanced Safety Avoidance (BMI/Age/Level Override)
         advanced_avoid_exercises = []
         safety_priority_note = ""
@@ -1983,6 +1991,7 @@ def main():
             )
 
         # Workout Location
+        # Workout Location
         st.subheader("🗺️ Workout Location")
         location_options = ["Home", "Gym", "Outdoor", "Any"]
         location_default_index = location_options.index(profile.get('workout_location', 'Home'))
@@ -1993,11 +2002,23 @@ def main():
         
         # Equipment
         st.subheader("🏋️ Available Equipment")
-        eq_options = ["Bodyweight Only", "Dumbbells", "Resistance Bands", "Kettlebells", "Barbell", "Bench", "Pull-up Bar", "Yoga Mat", "Machines"]
-        equipment = st.multiselect("Select all available equipment:", eq_options, default=profile.get('available_equipment', ["Bodyweight Only"]), key="equipment_input")
-
-        if not equipment:
-            equipment = ["Bodyweight Only"]
+        
+        # --- FIX: Auto-set equipment if Gym is selected ---
+        if workout_location == "Gym":
+            st.info("✅ **Gym Selected:** We will assume access to standard gym equipment (Machines, Cables, Barbells, Dumbbells, Bench).")
+            # Force full equipment list so the AI knows it has options
+            equipment = ["Full Gym Access", "Machines", "Cables", "Barbells", "Dumbbells", "Bench", "Pull-up Bar", "Kettlebells"]
+        else:
+            # Show manual selector for Home/Outdoor
+            eq_options = ["Bodyweight Only", "Dumbbells", "Resistance Bands", "Kettlebells", "Barbell", "Bench", "Pull-up Bar", "Yoga Mat"]
+            equipment = st.multiselect(
+                "Select all available equipment:", 
+                eq_options, 
+                default=profile.get('available_equipment', ["Bodyweight Only"]), 
+                key="equipment_input"
+            )
+            if not equipment:
+                equipment = ["Bodyweight Only"]
         
         # Submit button
         st.markdown("---")
