@@ -10,7 +10,8 @@ import time
 import os # Import os for path handling
  # New import
 import difflib # Import for fuzzy matching
-# Load environment variables immediately
+
+ # Load environment variables immediately
 
 # ============ CONFIGURATION ============
 # NOTE: The API key and Endpoint URL are set for an Azure Mistral deployment.
@@ -850,8 +851,8 @@ class FitnessAdvisor:
         workout_category: str = "Full Body"
     ) -> str:
         """
-        [FIX 2 Implementation Note] Builds the entire system prompt. The LLM is forced 
-        to use the dummy calorie value, which is later corrected by the Python function.
+        Builds the system prompt with strict safety enforcement, redundancy removal, 
+        and explicit blocking of non-standard exercises based on user profile and day index.
         """
         print("user_profile:", user_profile)
         
@@ -875,6 +876,11 @@ class FitnessAdvisor:
         # Determine programming targets
         level_data = TRAINING_LEVELS.get(fitness_level, TRAINING_LEVELS["Beginner (0–6 months)"])
         target_rpe = level_data['rpe_range']
+
+        # Get exclusions
+        level_rules_text = level_data['rules'] 
+        level_excluded_exercises = level_data.get('excluded_exercises', [])
+
         target_sets = self.goal_programming_guidelines.get(primary_goal, {}).get('sets', '2-3')
         target_rest_desc = self.goal_programming_guidelines.get(primary_goal, {}).get('rest', '45-60 seconds')
         max_main_exercises = self._determine_exercise_count(user_profile.get("session_duration", "30-45 minutes"), fitness_level)
@@ -924,6 +930,11 @@ class FitnessAdvisor:
             special_population_rules.append("❌ **STRICTLY AVOID:** Sit-ups, Crunches, Superman (hyperextension), Heavy Overhead Press, Bent Over Rows (unsupported), High Impact.")
             special_population_rules.append("✅ **USE SAFE ALTERNATIVES:** Bird-Dog, Dead Bug, Plank (if tolerated), Glute Bridge, Chest Supported Row.")
 
+        if any(x in combined_health_text for x in ['shoulder', 'rotator', 'impingement']):
+            special_population_rules.append("🚨 **SHOULDER PAIN DETECTED** 🚨")
+            special_population_rules.append("❌ **STRICTLY AVOID:** Overhead Press, Dips, Upright Rows, Full Push-ups (if painful).")
+            special_population_rules.append("✅ **USE:** Floor Press, Lateral Raise (scaption), External Rotation, Band Pull-aparts.")
+
         population_constraints_str = " | ".join(special_population_rules) if special_population_rules else "Standard population rules apply."
 
         # --- REPETITION AVOIDANCE ---
@@ -965,10 +976,7 @@ class FitnessAdvisor:
 
         # --- RULE INJECTION - RESTRICTIONS (Section 3) ---
         
-        # FIX: Explicitly add "Seated Hip Circles" to the avoidance list here
-        if 'Seated Hip Circles' not in exercises_to_avoid_list:
-            exercises_to_avoid_list.append("Seated Hip Circles")
-            exercises_to_avoid_list.append("Seated Hip Circle")
+        
 
         allowed_equipment = ', '.join(equipment_list)
         
@@ -1113,13 +1121,14 @@ class FitnessAdvisor:
             # ... [Previous parts of prompt list] ...
 
             # 3. RULES & CONSTRAINTS (General)
-            f"- **Fitness Level Constraints:** {level_rules}",
-            f"- **FORBIDDEN MOVES (Level-Specific):** You MUST NOT use these exercises: {' '.join(level_rules)}.",
+            f"- **Fitness Level Constraints:** {level_rules_text}",
+            f"- **FORBIDDEN MOVES (Level-Specific):** You MUST NOT use these exercises: {' '.join(level_excluded_exercises)}.",
             f"- **RECOMMENDED MOVES:** Prioritize these exercises: {' '.join(level_rules)}.",
             f"- **Training Consistency Rule:** {repetition_rule}", 
             f"- **Equipment & Location Rule:** {equipment_rule}. Strictly use only these equipment options: {allowed_equipment}. Not available equipment MUST NOT be included (e.g., resistance bands if not listed, no exercise using bands).", 
             f"- **STRICT EXERCISE NAME AVOIDANCE (All Previous Days):** DO NOT use these specific exercise names in ANY section: {', '.join(exercises_to_avoid_list) if exercises_to_avoid_list else 'None'}", 
             f"- **STRICT PATTERN AVOIDANCE (Recovery Constraint from last 3 days):** To ensure muscle group recovery and maximize variety, prioritize movements NOT listed here: {', '.join(patterns_to_avoid_list) if patterns_to_avoid_list else 'None/Minor Muscle Groups Only'}",
+            f"- **EXPLICITLY BANNED:** Do NOT use 'Seated Hip Rotation', 'Seated Hip Circles', or any non-standard/made-up exercise.",
             "",
             # 4. CRITICAL SAFETY OVERRIDES (HIGHEST PRIORITY)
             "### CRITICAL SAFETY OVERRIDES & MEDICAL MANDATES",
