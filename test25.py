@@ -10,7 +10,6 @@ import time
 import os # Import os for path handling
  # New import
 import difflib # Import for fuzzy matching
-
  # Load environment variables immediately
 
 # ============ CONFIGURATION ============
@@ -935,6 +934,11 @@ class FitnessAdvisor:
             special_population_rules.append("❌ **STRICTLY AVOID:** Overhead Press, Dips, Upright Rows, Full Push-ups (if painful).")
             special_population_rules.append("✅ **USE:** Floor Press, Lateral Raise (scaption), External Rotation, Band Pull-aparts.")
 
+        if any(x in combined_health_text for x in ['wrist', 'carpal', 'forearm', 'hand']):
+            special_population_rules.append("🚨 **WRIST PAIN DETECTED** 🚨")
+            special_population_rules.append("❌ **STRICTLY AVOID:** Standard Push-ups (palms down), Dips, Planks on hands, Burpees, Front Squats, Heavy Pressing.")
+            special_population_rules.append("✅ **USE:** Knuckle Push-ups (neutral wrist), Forearm Planks, Pulling exercises, Resistance Band Press.")
+
         population_constraints_str = " | ".join(special_population_rules) if special_population_rules else "Standard population rules apply."
 
         # --- REPETITION AVOIDANCE ---
@@ -987,7 +991,7 @@ class FitnessAdvisor:
         if location == "Gym" or "Full Gym Access" in equipment_list:
              equipment_rule = "WORKOUT LOCATION IS **GYM**. You MUST prioritize using **GYM SPECIFIC EQUIPMENT** (Machines, Cables, Barbells, Dumbbells) for the Main Workout. DO NOT simply generate a home workout. Use machines (e.g., Leg Press, Lat Pulldown) and cables."
         else:
-             equipment_rule = f"WORKOUT LOCATION is {location}. Exercises MUST align with the environment. If 'Home', limit to bodyweight. If 'Outdoor', prioritize walk, jog, step-ups, mobility drills, or bodyweight exercises."
+             equipment_rule = f"WORKOUT LOCATION is {location}. Available Equipment: [{allowed_equipment}]. You must NOT hallucinate equipment. If 'Dumbbells' are not in the list, DO NOT generate dumbbell exercises. If 'Bodyweight Only' is selected, every exercise must be equipment-free."
         # Advanced Safety Avoidance (BMI/Age/Level Override)
         advanced_avoid_exercises = []
         safety_priority_note = ""
@@ -1028,7 +1032,11 @@ class FitnessAdvisor:
         final_medical_restrictions = ' | '.join(medical_restrictions_list) if medical_restrictions_list else 'None.'
 
         # --- RULE INJECTION - STRUCTURE (Section 4) ---
-        
+        # --- INTERMEDIATE LEVEL ADJUSTMENT (FIX FOR "TOO ADVANCED") ---
+        # ### NEW: Constraint for Intermediate to keep it grounded ###
+        if fitness_level == "Intermediate (6 months–2 years)":
+            level_rules_text += " DO NOT jump to advanced calisthenics or high-impact plyometrics. Focus on foundational strength with increased volume (sets/reps) or slight loading, not high complexity."
+            
         # Required Main Workout Categories
         required_structure = ""
         target_body_parts_str = ', '.join(target_body_parts)
