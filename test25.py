@@ -193,7 +193,7 @@ STATIC_HOLD_SCALING = {
 }
 
 # ============ GOAL OPTIONS ============
-PRIMARY_GOALS = ["Weight Loss", "Muscle Gain", "Weight Maintenance"]
+PRIMARY_GOALS = ["Weight Loss", "Weight gain", "Weight Maintenance"]
 SECONDARY_GOALS = ["Increase Overall Strength", "Improve Cardiovascular Fitness", "Improve Flexibility & Mobility", "Rehabilitation & Injury Prevention", "Improve Posture & Balance"]
 
 
@@ -276,7 +276,7 @@ class FitnessAdvisor:
                 "sets": "2-3",
                 "focus_type": "Metabolic, circuit-style, full-body movements."
             },
-            "Muscle Gain": {
+            "Weight gain": {
                 "priority": "Prioritize progressive overload resistance training with RPE 6-8, controlled tempo (3-1-3), and sufficient rest. Target 3-5 sets per exercise.",
                 "rep_range": "6-12",
                 "rest": "60-90 seconds (Moderate rest for strength/hypertrophy)",
@@ -907,7 +907,7 @@ class FitnessAdvisor:
         if gender.lower() == "female":
             if fitness_level == "Beginner (0–6 months)":
                 special_population_rules.append("FEMALE BEGINNER: Avoid overly advanced upper-body progressions (e.g., standard push-ups from toes) immediately; start with incline or knee variations.")
-            special_population_rules.append("Slightly reduce upper-body volume relative to lower body unless goal is specifically 'Muscle Gain'.")
+            special_population_rules.append("Slightly reduce upper-body volume relative to lower body unless goal is specifically 'Weight gain'.")
 
         
 
